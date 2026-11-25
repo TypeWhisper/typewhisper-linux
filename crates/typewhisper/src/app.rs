@@ -876,9 +876,16 @@ fn start_recording(app: &Rc<App>) {
         }
     };
     if let Some(text) = refusal {
+        let busy = state.busy;
         state.interpreter.reset();
         drop(state);
-        app.dictation_failed(text);
+        if busy {
+            // The indicator already shows the running dictation. Error feedback
+            // would replace it and hide it before the text is inserted.
+            app.toast(text);
+        } else {
+            app.dictation_failed(text);
+        }
         return;
     }
     match Recorder::start() {
