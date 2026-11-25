@@ -1,0 +1,31 @@
+{
+  "id": "com.typewhisper.TypeWhisper.Plugin.Parakeet",
+  "runtime": "com.typewhisper.TypeWhisper",
+  "runtime-version": "master",
+  "sdk": "org.gnome.Sdk//51",
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+  "build-extension": true,
+  "separate-locales": false,
+  "appstream-compose": false,
+  "build-options": {
+    "prefix": "/app/plugins/Parakeet",
+    "append-path": "/usr/lib/sdk/rust-stable/bin",
+    "build-args": ["--share=network"],
+    "env": { "CARGO_HOME": "/run/build/parakeet/cargo" }
+  },
+  "modules": [
+    {
+      "name": "parakeet",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cargo build --release --locked -p tw-plugin-parakeet",
+        "install -Dm755 target/release/tw-plugin-parakeet ${FLATPAK_DEST}/com.typewhisper.parakeet/bin/tw-plugin-parakeet",
+        "install -Dm644 plugins/parakeet/manifest.json ${FLATPAK_DEST}/com.typewhisper.parakeet/manifest.json",
+        "install -Dm644 packaging/flatpak/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml"
+      ],
+      "sources": [
+        { "type": "dir", "path": "../..", "skip": ["target", ".flatpak-builder", "build-dir", "repo", ".git"] }
+      ]
+    }
+  ]
+}

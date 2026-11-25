@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Installs a development build for the current user, so it runs like an
 # installed app:
-# - a .desktop file whose Exec points at the build. The portals accept the app
-#   ID only when a matching .desktop file names a program that exists.
+# - a .desktop file whose Exec points at the build, and the icon. The portals
+#   accept the app ID only when a matching .desktop file names a program that exists.
 # - the Parakeet plugin package in the user plugin folder.
 #
 #   tools/dev/install-dev.sh [target-dir]   (default: target, release profile)
@@ -42,6 +42,8 @@ while IFS= read -r line; do
     printf '%s\n' "$line"
   fi
 done < "$repo/packaging/com.typewhisper.TypeWhisper.desktop" > "$apps/com.typewhisper.TypeWhisper.desktop"
+install -Dm644 "$repo/packaging/com.typewhisper.TypeWhisper.svg" \
+  "$data/icons/hicolor/scalable/apps/com.typewhisper.TypeWhisper.svg"
 
 plugin="$data/typewhisper/plugins/com.typewhisper.parakeet"
 mkdir -p "$plugin/bin"

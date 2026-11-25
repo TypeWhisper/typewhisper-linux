@@ -5,8 +5,9 @@
 //!
 //! 1. folders in `$TYPEWHISPER_PLUGIN_PATH` (colon-separated, for development),
 //! 2. the user's plugin folder, filled by the in-app catalog,
-//! 3. system folders: Flatpak extensions under `/app/plugins`, distribution
-//!    packages under `/usr/lib/typewhisper/plugins`.
+//! 3. system folders: Flatpak extensions, each mounted at `/app/plugins/<Name>`
+//!    with the plugin folder inside, and distribution packages under
+//!    `/usr/lib/typewhisper/plugins`.
 //!
 //! For the same plugin ID the highest version wins; on a tie a system copy wins.
 
@@ -18,8 +19,12 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use serde_json::{Value, json};
 use tw_plugin_protocol::{Frame, Manifest, PROTOCOL_VERSION, read_frame, write_frame};
 
+/// Mount point of the `com.typewhisper.TypeWhisper.Plugin` extension point.
+/// flatpak-builder writes its own `manifest.json` at the root of every
+/// extension, so each extension holds its plugin folders one level down.
+pub const FLATPAK_EXTENSIONS_DIR: &str = "/app/plugins";
+
 pub const SYSTEM_PLUGIN_DIRS: &[&str] = &[
-    "/app/plugins",
     "/usr/lib/typewhisper/plugins",
     "/usr/local/lib/typewhisper/plugins",
 ];
@@ -50,8 +55,26 @@ pub fn plugin_dirs(user_dir: &Path) -> Vec<(PathBuf, bool)> {
         })
         .unwrap_or_default();
     dirs.push((user_dir.to_path_buf(), false));
+    dirs.extend(
+        subfolders(Path::new(FLATPAK_EXTENSIONS_DIR))
+            .into_iter()
+            .map(|d| (d, true)),
+    );
     dirs.extend(SYSTEM_PLUGIN_DIRS.iter().map(|d| (PathBuf::from(d), true)));
     dirs
+}
+
+/// The folders directly inside `dir`, sorted, or none if it does not exist.
+fn subfolders(dir: &Path) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect();
+    found.sort();
+    found
 }
 
 /// Reads every `*/manifest.json` below the given folders.
@@ -320,6 +343,28 @@ mod tests {
         write_plugin(&root, "a", "1.0.0", "../../bin/sh");
         write_plugin(&root, "b", "1.0.0", "/bin/sh");
         assert!(discover(&[(root.clone(), false)]).is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn finds_plugins_inside_flatpak_extensions() {
+        let root = temp_root("extensions");
+        let extension = root.join("Parakeet");
+        write_plugin(
+            &extension,
+            "com.typewhisper.example",
+            "1.0.0",
+            "bin/example",
+        );
+        // flatpak-builder's own manifest at the extension root is no plugin.
+        std::fs::write(extension.join("manifest.json"), r#"{"id": "x"}"#).unwrap();
+        std::fs::write(root.join("stray-file"), "").unwrap();
+
+        let roots = subfolders(&root);
+        assert_eq!(roots, std::slice::from_ref(&extension));
+        let found = discover(&[(extension, true)]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].manifest.id, "com.typewhisper.example");
         let _ = std::fs::remove_dir_all(root);
     }
 

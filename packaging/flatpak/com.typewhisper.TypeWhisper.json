@@ -13,6 +13,14 @@
     "--share=network",
     "--device=dri"
   ],
+  "add-extensions": {
+    "com.typewhisper.TypeWhisper.Plugin": {
+      "directory": "plugins",
+      "subdirectories": true,
+      "no-autodownload": true,
+      "autodelete": true
+    }
+  },
   "build-options": {
     "append-path": "/usr/lib/sdk/rust-stable/bin",
     "build-args": ["--share=network"],
@@ -25,7 +33,9 @@
       "build-commands": [
         "cargo build --release --locked -p typewhisper",
         "install -Dm755 target/release/typewhisper /app/bin/typewhisper",
+        "install -d /app/plugins",
         "install -Dm644 packaging/com.typewhisper.TypeWhisper.desktop /app/share/applications/com.typewhisper.TypeWhisper.desktop",
+        "install -Dm644 packaging/com.typewhisper.TypeWhisper.svg /app/share/icons/hicolor/scalable/apps/com.typewhisper.TypeWhisper.svg",
         "install -Dm644 packaging/com.typewhisper.TypeWhisper.metainfo.xml /app/share/metainfo/com.typewhisper.TypeWhisper.metainfo.xml"
       ],
       "sources": [
