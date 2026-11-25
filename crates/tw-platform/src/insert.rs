@@ -296,7 +296,7 @@ async fn snapshot(
     };
     let first = future::select(owners.next(), Timer::after(OWNER_WAIT)).await;
     let future::Either::Left((Some((_, owner)), _)) = first else {
-        return Some(empty());
+        return snapshot_without_report(clipboard, session, empty).await;
     };
     if owner.session_is_owner() == Some(true) {
         return None;
@@ -313,6 +313,46 @@ async fn snapshot(
         saved.push((mime.clone(), bytes));
     }
     Some(saved)
+}
+
+/// Types read when the portal did not report the clipboard's owner in time.
+const PROBE_TYPES: &[&str] = &[
+    "text/plain;charset=utf-8",
+    "text/plain",
+    "UTF8_STRING",
+    "text/html",
+    "text/uri-list",
+    "image/png",
+];
+
+/// No owner report arrived, which on GNOME means an empty clipboard, but a
+/// late report must not count as one. GNOME answers a read of an empty
+/// clipboard with an error, while a filled clipboard answers every type, with
+/// no data for types it does not hold. So an error means empty; otherwise the
+/// common types that hold data are kept, and content of none of them is left
+/// alone.
+async fn snapshot_without_report(
+    clipboard: &Clipboard,
+    session: &Session<RemoteDesktop>,
+    empty: impl FnOnce() -> Snapshot,
+) -> Option<Snapshot> {
+    if clipboard
+        .selection_read(session, PROBE_TYPES[0])
+        .await
+        .is_err()
+    {
+        return Some(empty());
+    }
+    let mut saved = Snapshot::new();
+    let mut total = 0u64;
+    for mime in PROBE_TYPES {
+        let bytes = read_selection(clipboard, session, mime, SNAPSHOT_LIMIT - total).await?;
+        if !bytes.is_empty() {
+            total += bytes.len() as u64;
+            saved.push(((*mime).to_owned(), bytes));
+        }
+    }
+    (!saved.is_empty()).then_some(saved)
 }
 
 /// Reads one clipboard type. `None` when it fails, times out or exceeds `limit`.
