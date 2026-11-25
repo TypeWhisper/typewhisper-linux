@@ -7,7 +7,6 @@
 //! keeps serving it until another app copies something. The calls block on
 //! Wayland round trips and run on their own threads.
 
-use std::io::Read;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,7 +51,8 @@ pub async fn available() -> bool {
 /// Reads every type the clipboard offers. `Some(empty)` for an empty clipboard,
 /// `None` when a type cannot be read in full within `timeout` and `limit` bytes.
 pub async fn snapshot(limit: u64, timeout: Duration) -> Option<Snapshot> {
-    let read = unblock(move || {
+    let deadline = std::time::Instant::now() + timeout;
+    unblock(move || {
         let regular = paste::ClipboardType::Regular;
         let mimes = match paste::get_mime_types_ordered(regular, paste::Seat::Unspecified) {
             Ok(mimes) => mimes,
@@ -68,9 +68,7 @@ pub async fn snapshot(limit: u64, timeout: Duration) -> Option<Snapshot> {
                 paste::MimeType::Specific(&mime),
             )
             .ok()?;
-            let mut bytes = Vec::new();
-            // One byte more than what is left shows that the content is too large.
-            pipe.take(limit - total + 1).read_to_end(&mut bytes).ok()?;
+            let bytes = read_until(pipe, limit - total, deadline)?;
             total += bytes.len() as u64;
             if total > limit {
                 return None;
@@ -78,12 +76,36 @@ pub async fn snapshot(limit: u64, timeout: Duration) -> Option<Snapshot> {
             saved.push((mime, bytes));
         }
         Some(saved)
-    });
-    futures_util::pin_mut!(read);
-    match future::select(read, Timer::after(timeout)).await {
-        future::Either::Left((Some(snapshot), _)) => snapshot,
-        _ => None,
-    }
+    })
+    .await
+    .flatten()
+}
+
+/// Reads a transfer pipe to its end. `None` when it holds more than `limit`
+/// bytes or does not finish by `deadline`; the pipe is closed either way, so an
+/// owner that never finishes cannot keep this thread or its descriptor.
+fn read_until(
+    pipe: impl Into<std::os::fd::OwnedFd>,
+    limit: u64,
+    deadline: std::time::Instant,
+) -> Option<Vec<u8>> {
+    use futures_util::AsyncReadExt;
+    let file = std::fs::File::from(pipe.into());
+    let reader = async_io::Async::new(file).ok()?;
+    async_io::block_on(async {
+        let mut bytes = Vec::new();
+        let complete = {
+            // One byte more than the limit shows that the content is too large.
+            let mut limited = reader.take(limit + 1);
+            let read = limited.read_to_end(&mut bytes);
+            futures_util::pin_mut!(read);
+            matches!(
+                future::select(read, Timer::at(deadline)).await,
+                future::Either::Left((Ok(_), _))
+            )
+        };
+        (complete && bytes.len() as u64 <= limit).then_some(bytes)
+    })
 }
 
 /// Puts text on the clipboard. See [`offer`].
@@ -148,4 +170,43 @@ async fn offer(
 /// Empties the clipboard.
 pub async fn clear() {
     let _ = unblock(|| copy::clear(copy::ClipboardType::Regular, copy::Seat::All)).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::time::Instant;
+
+    #[test]
+    fn reads_a_finished_transfer() {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        writer.write_all(b"hello").unwrap();
+        drop(writer);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        assert_eq!(
+            read_until(reader, 100, deadline).as_deref(),
+            Some(&b"hello"[..])
+        );
+    }
+
+    #[test]
+    fn gives_up_on_a_transfer_that_never_ends() {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        writer.write_all(b"partial").unwrap();
+        let started = Instant::now();
+        let deadline = started + Duration::from_millis(100);
+        assert_eq!(read_until(reader, 100, deadline), None);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        drop(writer);
+    }
+
+    #[test]
+    fn rejects_content_over_the_limit() {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        writer.write_all(b"0123456789").unwrap();
+        drop(writer);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        assert_eq!(read_until(reader, 5, deadline), None);
+    }
 }

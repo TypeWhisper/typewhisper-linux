@@ -171,13 +171,14 @@ impl TextInserter {
         preserve_clipboard: bool,
     ) -> Result<(), InsertError> {
         use crate::data_control;
+        // The portal comes first: if it refuses, the clipboard stays untouched.
+        let (remote, _clipboard, session) = self.open().await?;
+        // Read after the portal's dialog, so text copied while it was open counts.
         let saved = if preserve_clipboard {
             data_control::snapshot(SNAPSHOT_LIMIT, READ_TIMEOUT * 4).await
         } else {
             None
         };
-        // The portal comes first: if it refuses, the clipboard stays untouched.
-        let (remote, _clipboard, session) = self.open().await?;
         // With the setting on, clipboard managers should not keep the dictation,
         // as on macOS.
         let replaced = match data_control::offer_text(text, preserve_clipboard).await {
