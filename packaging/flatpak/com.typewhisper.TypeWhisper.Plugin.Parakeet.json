@@ -156,7 +156,8 @@
         "cargo build --release --locked --offline -p tw-plugin-parakeet",
         "install -Dm755 target/release/tw-plugin-parakeet ${FLATPAK_DEST}/com.typewhisper.parakeet/bin/tw-plugin-parakeet",
         "install -Dm644 plugins/parakeet/manifest.json ${FLATPAK_DEST}/com.typewhisper.parakeet/manifest.json",
-        "install -Dm644 packaging/flatpak/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml"
+        "tools/i18n/translate-packaging.sh translated",
+        "install -Dm644 translated/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml ${FLATPAK_DEST}/share/metainfo/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml"
       ],
       "sources": [
         { "type": "dir", "path": "../..", "skip": ["target", ".flatpak-builder", "build-dir", "repo", ".git"] },

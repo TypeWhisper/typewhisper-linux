@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
   <id>com.typewhisper.TypeWhisper</id>
-  <name>TypeWhisper</name>
+  <name translate="no">TypeWhisper</name>
   <summary>Dictate into any app and transform text with workflows</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <developer id="com.typewhisper">
-    <name>TypeWhisper</name>
+    <name translate="no">TypeWhisper</name>
   </developer>
   <url type="homepage">https://typewhisper.com</url>
   <url type="vcs-browser">https://github.com/TypeWhisper/typewhisper-linux</url>

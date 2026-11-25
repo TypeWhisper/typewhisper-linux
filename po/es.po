@@ -352,3 +352,27 @@ msgstr "Listo"
 #: crates/typewhisper/src/terminals.rs
 msgid "Select Apps"
 msgstr "Seleccionar apps"
+
+#: packaging/com.typewhisper.TypeWhisper.desktop.in
+msgid "TypeWhisper"
+msgstr "TypeWhisper"
+
+#: packaging/com.typewhisper.TypeWhisper.desktop.in packaging/com.typewhisper.TypeWhisper.metainfo.xml.in
+msgid "Dictate into any app and transform text with workflows"
+msgstr "Dicta en cualquier app y transforma el texto con flujos de trabajo"
+
+#: packaging/com.typewhisper.TypeWhisper.desktop.in
+msgid "dictation;speech;transcription;voice;"
+msgstr "dictado;voz a texto;transcripción;escritura por voz;"
+
+#: packaging/com.typewhisper.TypeWhisper.metainfo.xml.in
+msgid "TypeWhisper turns speech into text in any app, with local or cloud speech models, and transforms the result with reusable workflows."
+msgstr "TypeWhisper convierte la voz en texto en cualquier app, con modelos de voz locales o en la nube, y transforma el resultado con flujos de trabajo reutilizables."
+
+#: packaging/com.typewhisper.TypeWhisper.metainfo.xml.in
+msgid "This is an early development version."
+msgstr "Esta es una versión temprana en desarrollo."
+
+#: packaging/flatpak/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml.in
+msgid "Local speech recognition for 25 European languages"
+msgstr "Reconocimiento de voz local para 25 idiomas europeos"

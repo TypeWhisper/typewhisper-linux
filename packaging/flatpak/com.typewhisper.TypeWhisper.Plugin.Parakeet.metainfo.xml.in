@@ -2,12 +2,12 @@
 <component type="addon">
   <id>com.typewhisper.TypeWhisper.Plugin.Parakeet</id>
   <extends>com.typewhisper.TypeWhisper</extends>
-  <name>NVIDIA Parakeet</name>
+  <name translate="no">NVIDIA Parakeet</name>
   <summary>Local speech recognition for 25 European languages</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <developer id="com.typewhisper">
-    <name>TypeWhisper</name>
+    <name translate="no">TypeWhisper</name>
   </developer>
   <url type="homepage">https://typewhisper.com</url>
   <url type="vcs-browser">https://github.com/TypeWhisper/typewhisper-linux</url>
