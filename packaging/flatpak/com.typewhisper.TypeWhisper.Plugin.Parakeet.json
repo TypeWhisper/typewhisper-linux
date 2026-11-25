@@ -15,7 +15,7 @@
       "name": "onnxruntime",
       "buildsystem": "simple",
       "build-commands": [
-        "bsdtar -xf onnxruntime.zip --strip-components 1",
+        "bsdtar -xf onnxruntime.zip --no-same-owner --strip-components 1",
         "install -Dm644 -t ${FLATPAK_DEST}/lib lib/libonnxruntime.a",
         "install -Dm644 -t ${FLATPAK_DEST}/include/onnxruntime include/*.h"
       ],
