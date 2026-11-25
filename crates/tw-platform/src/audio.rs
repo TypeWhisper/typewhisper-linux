@@ -74,14 +74,16 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Opens the microphone and starts recording on a background thread.
+    /// Starts recording on a background thread. The thread opens the
+    /// microphone, so the caller's main loop does not wait for the audio server;
+    /// a failure to open it is reported by [`Recorder::stop`].
     pub fn start() -> Result<Self, String> {
-        let simple = connect()?;
         let running = Arc::new(AtomicBool::new(true));
         let flag = Arc::clone(&running);
         let thread = std::thread::Builder::new()
             .name("tw-recorder".into())
             .spawn(move || {
+                let simple = connect()?;
                 let mut samples = Vec::new();
                 let mut bytes = vec![0u8; CHUNK_SAMPLES * 4];
                 while flag.load(Ordering::Acquire) {

@@ -41,6 +41,8 @@ const PASTE_GRACE: Duration = Duration::from_millis(400);
 pub enum InsertError {
     /// The user denied the request or left keyboard or clipboard access switched off.
     NotAllowed(&'static str),
+    /// No clipboard request was answered, so the text cannot have arrived.
+    NotDelivered,
     Portal(ashpd::Error),
 }
 
@@ -48,6 +50,12 @@ impl std::fmt::Display for InsertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InsertError::NotAllowed(what) => write!(f, "{what}"),
+            InsertError::NotDelivered => {
+                write!(
+                    f,
+                    "The text did not reach the clipboard, so nothing was pasted."
+                )
+            }
             InsertError::Portal(error) => write!(f, "The desktop refused the insertion: {error}"),
         }
     }
@@ -173,6 +181,7 @@ async fn paste(
 
     // The compositor asks for the data right away and again when the target
     // pastes, so transfers are served while the keys are pressed.
+    let delivered = std::cell::Cell::new(false);
     let serve = async {
         // Portals send session signals only to the session's owner, and this
         // connection has no other remote desktop session open.
@@ -183,6 +192,9 @@ async fn paste(
                     .is_ok(),
                 Err(_) => false,
             };
+            if written {
+                delivered.set(true);
+            }
             let _ = clipboard
                 .selection_write_done(session, serial, written)
                 .await;
@@ -211,8 +223,15 @@ async fn paste(
     };
     pin_mut!(serve, press);
     match future::select(press, serve).await {
-        future::Either::Left((result, _)) => result,
-        future::Either::Right(((), press)) => press.await,
+        future::Either::Left((result, _)) => result?,
+        future::Either::Right(((), press)) => press.await?,
+    }
+    // A served transfer shows that a reader got the text, not that the target
+    // inserted it. Without one, the paste certainly failed.
+    if delivered.get() {
+        Ok(())
+    } else {
+        Err(InsertError::NotDelivered)
     }
 }
 

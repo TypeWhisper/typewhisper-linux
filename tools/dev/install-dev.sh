@@ -10,15 +10,38 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 target_dir="${1:-${CARGO_TARGET_DIR:-$repo/target}}"
+# The .desktop file needs an absolute path.
+mkdir -p "$target_dir"
+target_dir="$(cd "$target_dir" && pwd)"
 target="$target_dir/release"
 cargo build --release --locked --target-dir "$target_dir" \
   -p typewhisper -p tw-plugin-parakeet --manifest-path "$repo/Cargo.toml"
 
-data="${XDG_DATA_HOME:-$HOME/.local/share}"
+# Quotes a path as one argument of an Exec key: the quoting rule escapes
+# " ` $ and \, the string rule then doubles every backslash, and % becomes %%.
+desktop_quote() {
+  local s=$1 bs='\'
+  s=${s//"$bs"/"$bs$bs"}
+  s=${s//'"'/"$bs\""}
+  s=${s//'`'/"$bs\`"}
+  s=${s//'$'/"$bs\$"}
+  s=${s//"$bs"/"$bs$bs"}
+  s=${s//%/%%}
+  printf '"%s"' "$s"
+}
+
+data="${XDG_DATA_HOME:-}"
+[[ $data == /* ]] || data="$HOME/.local/share"
 apps="$data/applications"
 mkdir -p "$apps"
-sed "s|^Exec=.*|Exec=$target/typewhisper|" "$repo/packaging/com.typewhisper.TypeWhisper.desktop" \
-  > "$apps/com.typewhisper.TypeWhisper.desktop"
+exec_line="Exec=$(desktop_quote "$target/typewhisper")"
+while IFS= read -r line; do
+  if [[ $line == Exec=* ]]; then
+    printf '%s\n' "$exec_line"
+  else
+    printf '%s\n' "$line"
+  fi
+done < "$repo/packaging/com.typewhisper.TypeWhisper.desktop" > "$apps/com.typewhisper.TypeWhisper.desktop"
 
 plugin="$data/typewhisper/plugins/com.typewhisper.parakeet"
 mkdir -p "$plugin/bin"

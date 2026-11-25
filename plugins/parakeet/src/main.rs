@@ -69,7 +69,10 @@ impl Plugin {
                 }))
             }
             "models.download" => {
-                if !self.model_installed() {
+                // `force` replaces files that exist but do not load. The old files stay
+                // until the new download has passed its checksum.
+                let force = params["force"].as_bool().unwrap_or(false);
+                if force || !self.model_installed() {
                     download_model(&self.data_dir, out)
                         .map_err(|e| (-32010, format!("Download failed: {e}")))?;
                 }

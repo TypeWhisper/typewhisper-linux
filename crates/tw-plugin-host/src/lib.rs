@@ -167,7 +167,9 @@ impl PluginProcess {
         host_version: &str,
     ) -> Result<(Self, Value), PluginError> {
         std::fs::create_dir_all(data_dir)?;
-        let mut child = Command::new(plugin.executable())
+        // A relative program path would be resolved after the change of directory.
+        let executable = std::path::absolute(plugin.executable())?;
+        let mut child = Command::new(executable)
             .current_dir(&plugin.dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

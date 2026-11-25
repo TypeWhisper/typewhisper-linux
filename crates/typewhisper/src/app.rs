@@ -14,7 +14,7 @@ use tw_platform::audio::{Recorder, SAMPLE_RATE};
 use tw_platform::insert::TextInserter;
 use tw_platform::shortcuts::{self, BoundShortcut, Command, PressInterpreter};
 use tw_platform::zbus;
-use tw_plugin_host::{PluginProcess, discover, plugin_dirs};
+use tw_plugin_host::{PluginError, PluginProcess, discover, plugin_dirs};
 
 use crate::APP_ID;
 use crate::shell_bridge::ShellBridge;
@@ -445,19 +445,23 @@ async fn download_model(app: Rc<App>) {
             .lock()
             .map_err(|_| "The plugin is unavailable.".to_string())?;
         process
-            .call("models.download", json!({}), &mut |method, params| {
-                if method != "models.progress" {
-                    return;
-                }
-                let text = if params["unpacking"].as_bool() == Some(true) {
-                    "Unpacking…".to_owned()
-                } else {
-                    let received = params["receivedBytes"].as_f64().unwrap_or(0.0);
-                    let total = params["totalBytes"].as_f64().unwrap_or(1.0).max(1.0);
-                    format!("Downloading {:.0} %", 100.0 * received / total)
-                };
-                let _ = progress_tx.send_blocking(text);
-            })
+            .call(
+                "models.download",
+                json!({"force": true}),
+                &mut |method, params| {
+                    if method != "models.progress" {
+                        return;
+                    }
+                    let text = if params["unpacking"].as_bool() == Some(true) {
+                        "Unpacking…".to_owned()
+                    } else {
+                        let received = params["receivedBytes"].as_f64().unwrap_or(0.0);
+                        let total = params["totalBytes"].as_f64().unwrap_or(1.0).max(1.0);
+                        format!("Downloading {:.0} %", 100.0 * received / total)
+                    };
+                    let _ = progress_tx.send_blocking(text);
+                },
+            )
             .map_err(|e| e.to_string())
     })
     .await
@@ -513,22 +517,25 @@ fn stop_recording(app: Rc<App>) {
     app.set_status("Transcribing…");
     app.indicator("processing", "Transcribing…");
     glib::spawn_future_local(async move {
-        let transcribed = gio::spawn_blocking(move || -> Result<String, String> {
-            let samples = recorder.stop()?;
+        let transcribed = gio::spawn_blocking(move || -> Result<String, TranscribeError> {
+            let samples = recorder.stop().map_err(TranscribeError::Failed)?;
             if samples.len() < MIN_SAMPLES {
                 return Ok(String::new());
             }
-            let plugin = plugin.ok_or("The speech model is not loaded.")?;
-            let mut process = plugin
-                .lock()
-                .map_err(|_| "The plugin is unavailable.".to_string())?;
-            let result = process
-                .transcribe(&samples, None)
-                .map_err(|e| e.to_string())?;
-            Ok(result["text"].as_str().unwrap_or_default().to_owned())
+            let plugin = plugin.ok_or(TranscribeError::Failed(
+                "The speech model is not loaded.".into(),
+            ))?;
+            let mut process = plugin.lock().map_err(|_| TranscribeError::PluginLost)?;
+            match process.transcribe(&samples, None) {
+                Ok(result) => Ok(result["text"].as_str().unwrap_or_default().to_owned()),
+                Err(PluginError::Io(_) | PluginError::Protocol(_)) => {
+                    Err(TranscribeError::PluginLost)
+                }
+                Err(error) => Err(TranscribeError::Failed(error.to_string())),
+            }
         })
         .await
-        .unwrap_or_else(|_| Err("The transcription crashed.".into()));
+        .unwrap_or(Err(TranscribeError::PluginLost));
 
         match transcribed {
             Ok(text) if text.is_empty() => app.set_status("Nothing was heard."),
@@ -547,9 +554,26 @@ fn stop_recording(app: Rc<App>) {
                     None => app.set_status("No connection to the desktop portals."),
                 }
             }
-            Err(error) => app.set_status(&error),
+            Err(TranscribeError::Failed(error)) => app.set_status(&error),
+            Err(TranscribeError::PluginLost) => {
+                // The process is gone or in an unknown state. Start a new one,
+                // which loads the model again.
+                {
+                    let mut state = app.state.borrow_mut();
+                    state.plugin = None;
+                    state.model_ready = false;
+                }
+                app.set_status("The speech model stopped. Starting it again…");
+                glib::spawn_future_local(start_plugin(Rc::clone(&app)));
+            }
         }
         app.state.borrow_mut().busy = false;
         app.indicator("idle", "");
     });
+}
+
+enum TranscribeError {
+    Failed(String),
+    /// The plugin process died or no longer answers in order.
+    PluginLost,
 }
