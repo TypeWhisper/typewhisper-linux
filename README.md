@@ -33,6 +33,22 @@ terminals that show up in AT-SPI.
 | `packaging` | Flatpak manifest, desktop file, AppStream metadata |
 | `tools` | Headless VM sessions, probes for portal behaviour, Flatpak helpers |
 
+## Translations
+
+The app uses the system language. Besides English it speaks German, Spanish,
+Japanese and Simplified Chinese, the languages of the macOS app. The texts are
+gettext catalogs in `po/`, with the English text as the message ID. After adding
+or changing a text in the code, run
+
+```sh
+tools/i18n/update-translations.py path/to/typewhisper-mac/TypeWhisper/Resources/Localizable.xcstrings
+```
+
+It adds the new texts to every catalog, takes the macOS app's translation where
+the English text is the same, and lists the texts that still need one. CI fails
+while a translation is missing. `tools/dev/install-dev.sh` and the Flatpak build
+compile the catalogs with `msgfmt`.
+
 ## Plugins
 
 Every plugin is its own executable with a `manifest.json`. The app starts it and
@@ -46,13 +62,13 @@ packages.
 Fedora:
 
 ```sh
-sudo dnf install gcc gcc-c++ cargo rust gtk4-devel gtk4-layer-shell-devel libadwaita-devel pulseaudio-libs-devel
+sudo dnf install gcc gcc-c++ cargo rust gettext gtk4-devel gtk4-layer-shell-devel libadwaita-devel pulseaudio-libs-devel
 cargo build --workspace
 cargo test --workspace
 cargo run -p typewhisper
 ```
 
-Ubuntu 26.04: install `build-essential libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev libpulse-dev`
+Ubuntu 26.04: install `build-essential gettext libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev libpulse-dev`
 and Rust through rustup.
 
 To dictate with a development build, install it for your user first:

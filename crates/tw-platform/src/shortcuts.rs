@@ -10,6 +10,8 @@ use ashpd::desktop::{CreateSessionOptions, Session};
 use ashpd::zbus::{self, MatchRule, MessageStream, OwnedObjectPath, OwnedVariant};
 use futures_util::{Stream, StreamExt, future};
 
+use crate::i18n::tr;
+
 const PORTAL_NAME: &str = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
 const INTERFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
@@ -137,9 +139,9 @@ fn readable_accelerator(word: &str) -> Option<String> {
     loop {
         let (modifier, after) = rest.split_once('>')?;
         parts.push(match modifier.to_ascii_lowercase().as_str() {
-            "control" | "ctrl" | "primary" => "Ctrl".to_owned(),
+            "control" | "ctrl" | "primary" => tr("Ctrl"),
             "alt" | "mod1" => "Alt".to_owned(),
-            "shift" => "Shift".to_owned(),
+            "shift" => tr("Shift"),
             "super" | "mod4" => "Super".to_owned(),
             "meta" => "Meta".to_owned(),
             "hyper" => "Hyper".to_owned(),

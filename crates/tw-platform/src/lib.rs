@@ -6,6 +6,7 @@
 pub mod accessibility;
 pub mod audio;
 pub mod data_control;
+pub mod i18n;
 pub mod insert;
 pub mod portal;
 pub mod settings;

@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+use tw_platform::i18n::{n_, tr, tr_with};
 
 /// App IDs of terminals that paste with Ctrl+Shift+V, in lower case. Desktops
 /// report the ID of the app's desktop file, or the window class of a window
@@ -40,10 +41,12 @@ const BUILT_IN: &[&str] = &[
 ];
 
 /// The description of the settings group.
-pub const DESCRIPTION: &str = "TypeWhisper pastes dictations into terminal apps with Ctrl+Shift+V, \
+pub const DESCRIPTION: &str = n_(
+    "TypeWhisper pastes dictations into terminal apps with Ctrl+Shift+V, \
      because terminals pass Ctrl+V on to the program running in them. GNOME Terminal, Ptyxis, \
      Console, Konsole, Alacritty, kitty, WezTerm, foot, Ghostty and other well-known terminals \
-     are always included. Add another terminal if dictating into it pastes nothing.";
+     are always included. Add another terminal if dictating into it pastes nothing.",
+);
 
 /// Lower case and without `.desktop`, as in the lists.
 fn normalized(app_id: &str) -> String {
@@ -81,7 +84,7 @@ impl TerminalApps {
         app_ids: Vec<String>,
         save: impl Fn(&[String]) + 'static,
     ) -> Rc<Self> {
-        let select = adw::ButtonRow::builder().title("Select Apps…").build();
+        let select = adw::ButtonRow::builder().title(tr("Select Apps…")).build();
         group.add(&select);
         let this = Rc::new(Self {
             group: group.clone(),
@@ -136,13 +139,13 @@ impl TerminalApps {
             row.add_prefix(&app_icon(icon.as_ref()));
             let remove = gtk::Button::builder()
                 .icon_name("list-remove-symbolic")
-                .tooltip_text("Remove")
+                .tooltip_text(tr("Remove"))
                 .valign(gtk::Align::Center)
                 .css_classes(["flat"])
                 .build();
-            remove.update_property(&[gtk::accessible::Property::Label(&format!(
-                "Remove {}",
-                name.as_deref().unwrap_or(app_id)
+            remove.update_property(&[gtk::accessible::Property::Label(&tr_with(
+                "Remove {app}",
+                &[("app", name.as_deref().unwrap_or(app_id))],
             ))]);
             let weak = Rc::downgrade(self);
             let id = app_id.clone();
@@ -194,10 +197,10 @@ impl TerminalApps {
         }
 
         let search = gtk::SearchEntry::builder()
-            .placeholder_text("Search Apps…")
+            .placeholder_text(tr("Search Apps…"))
             .build();
         let none = gtk::Label::builder()
-            .label("No apps found")
+            .label(tr("No apps found"))
             .css_classes(["dim-label"])
             .build();
         let add = gtk::Button::builder()
@@ -230,7 +233,7 @@ impl TerminalApps {
             add,
             move |search| {
                 let query = search.text().trim().to_owned();
-                add.set_label(&format!("Add “{query}” as App ID"));
+                add.set_label(&tr_with("Add “{app_id}” as App ID", &[("app_id", &query)]));
                 add.set_visible(!query.is_empty());
                 list.invalidate_filter();
             }
@@ -252,7 +255,7 @@ impl TerminalApps {
         ));
 
         let done = gtk::Button::builder()
-            .label("Done")
+            .label(tr("Done"))
             .css_classes(["suggested-action"])
             .build();
         let header = adw::HeaderBar::builder()
@@ -284,7 +287,7 @@ impl TerminalApps {
         view.add_top_bar(&search_bar);
         view.set_content(Some(&scrolled));
         let dialog = adw::Dialog::builder()
-            .title("Select Apps")
+            .title(tr("Select Apps"))
             .content_width(440)
             .content_height(560)
             .child(&view)

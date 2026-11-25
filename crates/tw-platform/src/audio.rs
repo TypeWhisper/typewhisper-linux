@@ -10,6 +10,8 @@ use libpulse_binding::sample::{Format, Spec};
 use libpulse_binding::stream::Direction;
 use libpulse_simple_binding::Simple;
 
+use crate::i18n::{tr, tr_with};
+
 /// Sample rate of every buffer TypeWhisper hands to a transcription engine.
 pub const SAMPLE_RATE: u32 = 16_000;
 const CHUNK_SAMPLES: usize = SAMPLE_RATE as usize / 10; // 100 ms
@@ -41,13 +43,18 @@ fn connect() -> Result<Simple, String> {
         None,
         Some(&attr),
     )
-    .map_err(|e| format!("Could not open the microphone: {e}"))
+    .map_err(|e| {
+        tr_with(
+            "Could not open the microphone: {error}",
+            &[("error", &format!("{e}"))],
+        )
+    })
 }
 
 fn read_chunk(simple: &Simple, bytes: &mut [u8], samples: &mut Vec<f32>) -> Result<(), String> {
     simple
         .read(bytes)
-        .map_err(|e| format!("Recording failed: {e}"))?;
+        .map_err(|e| tr_with("Recording failed: {error}", &[("error", &format!("{e}"))]))?;
     let (chunks, _) = bytes.as_chunks::<4>();
     samples.extend(chunks.iter().map(|b| f32::from_le_bytes(*b)));
     Ok(())
@@ -94,7 +101,12 @@ impl Recorder {
                 }
                 Ok(samples)
             })
-            .map_err(|e| format!("Could not start the recorder: {e}"))?;
+            .map_err(|e| {
+                tr_with(
+                    "Could not start the recorder: {error}",
+                    &[("error", &format!("{e}"))],
+                )
+            })?;
         Ok(Self {
             running,
             thread: Some(thread),
@@ -109,7 +121,7 @@ impl Recorder {
             .take()
             .expect("recorder thread")
             .join()
-            .map_err(|_| "The recorder thread panicked".to_string())?
+            .map_err(|_| tr("The recorder stopped unexpectedly."))?
     }
 }
 
