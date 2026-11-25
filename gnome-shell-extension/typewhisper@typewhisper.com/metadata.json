@@ -1,0 +1,8 @@
+{
+  "uuid": "typewhisper@typewhisper.com",
+  "name": "TypeWhisper",
+  "description": "Shows the TypeWhisper dictation indicator above all windows and tells TypeWhisper which app is in front, for app-specific workflows. Needs the TypeWhisper app.",
+  "shell-version": ["51"],
+  "url": "https://typewhisper.com",
+  "version-name": "0.1"
+}

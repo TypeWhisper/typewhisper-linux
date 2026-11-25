@@ -1,0 +1,11 @@
+{
+  "id": "com.typewhisper.parakeet",
+  "name": "NVIDIA Parakeet",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "minHostVersion": "0.1.0",
+  "executable": "bin/tw-plugin-parakeet",
+  "categories": ["transcription"],
+  "locality": "local",
+  "architectures": ["x64", "arm64"]
+}

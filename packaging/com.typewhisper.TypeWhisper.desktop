@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=TypeWhisper
+Comment=Dictate into any app and transform text with workflows
+Exec=typewhisper
+Icon=com.typewhisper.TypeWhisper
+Categories=Utility;Accessibility;AudioVideo;
+Keywords=dictation;speech;transcription;voice;
+StartupNotify=true
+DBusActivatable=false

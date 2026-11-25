@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.typewhisper.TypeWhisper</id>
+  <name>TypeWhisper</name>
+  <summary>Dictate into any app and transform text with workflows</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="com.typewhisper">
+    <name>TypeWhisper</name>
+  </developer>
+  <url type="homepage">https://typewhisper.com</url>
+  <url type="vcs-browser">https://github.com/TypeWhisper/typewhisper-linux</url>
+  <description>
+    <p>TypeWhisper turns speech into text in any app, with local or cloud speech models, and transforms the result with reusable workflows.</p>
+    <p>This is an early development version.</p>
+  </description>
+  <launchable type="desktop-id">com.typewhisper.TypeWhisper.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+</component>

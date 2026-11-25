@@ -1,0 +1,36 @@
+{
+  "id": "com.typewhisper.TypeWhisper",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "51",
+  "sdk": "org.gnome.Sdk",
+  "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+  "command": "typewhisper",
+  "finish-args": [
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--socket=pulseaudio",
+    "--share=ipc",
+    "--share=network",
+    "--device=dri"
+  ],
+  "build-options": {
+    "append-path": "/usr/lib/sdk/rust-stable/bin",
+    "build-args": ["--share=network"],
+    "env": { "CARGO_HOME": "/run/build/typewhisper/cargo" }
+  },
+  "modules": [
+    {
+      "name": "typewhisper",
+      "buildsystem": "simple",
+      "build-commands": [
+        "cargo build --release --locked -p typewhisper",
+        "install -Dm755 target/release/typewhisper /app/bin/typewhisper",
+        "install -Dm644 packaging/com.typewhisper.TypeWhisper.desktop /app/share/applications/com.typewhisper.TypeWhisper.desktop",
+        "install -Dm644 packaging/com.typewhisper.TypeWhisper.metainfo.xml /app/share/metainfo/com.typewhisper.TypeWhisper.metainfo.xml"
+      ],
+      "sources": [
+        { "type": "dir", "path": "../..", "skip": ["target", ".flatpak-builder", "build-dir", "repo", ".git"] }
+      ]
+    }
+  ]
+}

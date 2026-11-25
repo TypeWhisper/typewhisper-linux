@@ -1,0 +1,205 @@
+[
+  {
+    "input" : "  Recieve ",
+    "normalized" : "recieve",
+    "regexId" : "dictionary:correction:regex:ICBSZWNpZXZlIA",
+    "snippetId" : "snippet:cmVjaWV2ZQ",
+    "termId" : "dictionary:term:cmVjaWV2ZQ"
+  },
+  {
+    "input" : "Café",
+    "normalized" : "cafe",
+    "regexId" : "dictionary:correction:regex:Q2Fmw6k",
+    "snippetId" : "snippet:Y2FmZQ",
+    "termId" : "dictionary:term:Y2FmZQ"
+  },
+  {
+    "input" : "Café",
+    "normalized" : "cafe",
+    "regexId" : "dictionary:correction:regex:Q2FmZcyB",
+    "snippetId" : "snippet:Y2FmZQ",
+    "termId" : "dictionary:term:Y2FmZQ"
+  },
+  {
+    "input" : "STRASSE",
+    "normalized" : "strasse",
+    "regexId" : "dictionary:correction:regex:U1RSQVNTRQ",
+    "snippetId" : "snippet:c3RyYXNzZQ",
+    "termId" : "dictionary:term:c3RyYXNzZQ"
+  },
+  {
+    "input" : "Straße",
+    "normalized" : "strasse",
+    "regexId" : "dictionary:correction:regex:U3RyYcOfZQ",
+    "snippetId" : "snippet:c3RyYXNzZQ",
+    "termId" : "dictionary:term:c3RyYXNzZQ"
+  },
+  {
+    "input" : "İstanbul",
+    "normalized" : "istanbul",
+    "regexId" : "dictionary:correction:regex:xLBzdGFuYnVs",
+    "snippetId" : "snippet:aXN0YW5idWw",
+    "termId" : "dictionary:term:aXN0YW5idWw"
+  },
+  {
+    "input" : "ı",
+    "normalized" : "ı",
+    "regexId" : "dictionary:correction:regex:xLE",
+    "snippetId" : "snippet:xLE",
+    "termId" : "dictionary:term:xLE"
+  },
+  {
+    "input" : "ﬁle",
+    "normalized" : "file",
+    "regexId" : "dictionary:correction:regex:76yBbGU",
+    "snippetId" : "snippet:ZmlsZQ",
+    "termId" : "dictionary:term:ZmlsZQ"
+  },
+  {
+    "input" : "Ångström",
+    "normalized" : "angstrom",
+    "regexId" : "dictionary:correction:regex:w4VuZ3N0csO2bQ",
+    "snippetId" : "snippet:YW5nc3Ryb20",
+    "termId" : "dictionary:term:YW5nc3Ryb20"
+  },
+  {
+    "input" : "ÆON",
+    "normalized" : "æon",
+    "regexId" : "dictionary:correction:regex:w4ZPTg",
+    "snippetId" : "snippet:w6Zvbg",
+    "termId" : "dictionary:term:w6Zvbg"
+  },
+  {
+    "input" : "Øresund",
+    "normalized" : "øresund",
+    "regexId" : "dictionary:correction:regex:w5hyZXN1bmQ",
+    "snippetId" : "snippet:w7hyZXN1bmQ",
+    "termId" : "dictionary:term:w7hyZXN1bmQ"
+  },
+  {
+    "input" : "naïve",
+    "normalized" : "naive",
+    "regexId" : "dictionary:correction:regex:bmHDr3Zl",
+    "snippetId" : "snippet:bmFpdmU",
+    "termId" : "dictionary:term:bmFpdmU"
+  },
+  {
+    "input" : "日本語",
+    "normalized" : "日本語",
+    "regexId" : "dictionary:correction:regex:5pel5pys6Kqe",
+    "snippetId" : "snippet:5pel5pys6Kqe",
+    "termId" : "dictionary:term:5pel5pys6Kqe"
+  },
+  {
+    "input" : "Ǆemal",
+    "normalized" : "ǆemal",
+    "regexId" : "dictionary:correction:regex:x4RlbWFs",
+    "snippetId" : "snippet:x4ZlbWFs",
+    "termId" : "dictionary:term:x4ZlbWFs"
+  },
+  {
+    "input" : "ŉ",
+    "normalized" : "ʼn",
+    "regexId" : "dictionary:correction:regex:xYk",
+    "snippetId" : "snippet:yrxu",
+    "termId" : "dictionary:term:yrxu"
+  },
+  {
+    "input" : "ΣΊΣΥΦΟΣ",
+    "normalized" : "σισυφοσ",
+    "regexId" : "dictionary:correction:regex:zqPOis6jzqXOps6fzqM",
+    "snippetId" : "snippet:z4POuc-Dz4XPhs6_z4M",
+    "termId" : "dictionary:term:z4POuc-Dz4XPhs6_z4M"
+  },
+  {
+    "input" : " tab\t\n",
+    "normalized" : "tab",
+    "regexId" : "dictionary:correction:regex:wqB0YWIJCg",
+    "snippetId" : "snippet:dGFi",
+    "termId" : "dictionary:term:dGFi"
+  },
+  {
+    "input" : "Ⅻ",
+    "normalized" : "ⅻ",
+    "regexId" : "dictionary:correction:regex:4oWr",
+    "snippetId" : "snippet:4oW7",
+    "termId" : "dictionary:term:4oW7"
+  },
+  {
+    "input" : "ｆｕｌｌ",
+    "normalized" : "ｆｕｌｌ",
+    "regexId" : "dictionary:correction:regex:772G772V772M772M",
+    "snippetId" : "snippet:772G772V772M772M",
+    "termId" : "dictionary:term:772G772V772M772M"
+  },
+  {
+    "input" : "ë́",
+    "normalized" : "e",
+    "regexId" : "dictionary:correction:regex:ZcyIzIE",
+    "snippetId" : "snippet:ZQ",
+    "termId" : "dictionary:term:ZQ"
+  },
+  {
+    "input" : "Œuvre",
+    "normalized" : "œuvre",
+    "regexId" : "dictionary:correction:regex:xZJ1dnJl",
+    "snippetId" : "snippet:xZN1dnJl",
+    "termId" : "dictionary:term:xZN1dnJl"
+  },
+  {
+    "input" : "ǅ",
+    "normalized" : "ǆ",
+    "regexId" : "dictionary:correction:regex:x4U",
+    "snippetId" : "snippet:x4Y",
+    "termId" : "dictionary:term:x4Y"
+  },
+  {
+    "input" : "K",
+    "normalized" : "k",
+    "regexId" : "dictionary:correction:regex:Sw",
+    "snippetId" : "snippet:aw",
+    "termId" : "dictionary:term:aw"
+  },
+  {
+    "input" : "Å",
+    "normalized" : "a",
+    "regexId" : "dictionary:correction:regex:w4U",
+    "snippetId" : "snippet:YQ",
+    "termId" : "dictionary:term:YQ"
+  },
+  {
+    "input" : "ﬀ",
+    "normalized" : "ff",
+    "regexId" : "dictionary:correction:regex:76yA",
+    "snippetId" : "snippet:ZmY",
+    "termId" : "dictionary:term:ZmY"
+  },
+  {
+    "input" : "ǰ",
+    "normalized" : "j",
+    "regexId" : "dictionary:correction:regex:x7A",
+    "snippetId" : "snippet:ag",
+    "termId" : "dictionary:term:ag"
+  },
+  {
+    "input" : "Mötley Crüe",
+    "normalized" : "motley crue",
+    "regexId" : "dictionary:correction:regex:TcO2dGxleSBDcsO8ZQ",
+    "snippetId" : "snippet:bW90bGV5IGNydWU",
+    "termId" : "dictionary:term:bW90bGV5IGNydWU"
+  },
+  {
+    "input" : ";hello",
+    "normalized" : ";hello",
+    "regexId" : "dictionary:correction:regex:O2hlbGxv",
+    "snippetId" : "snippet:O2hlbGxv",
+    "termId" : "dictionary:term:O2hlbGxv"
+  },
+  {
+    "input" : "🙂 Emoji",
+    "normalized" : "🙂 emoji",
+    "regexId" : "dictionary:correction:regex:8J-ZgiBFbW9qaQ",
+    "snippetId" : "snippet:8J-ZgiBlbW9qaQ",
+    "termId" : "dictionary:term:8J-ZgiBlbW9qaQ"
+  }
+]

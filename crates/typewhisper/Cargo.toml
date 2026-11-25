@@ -1,0 +1,12 @@
+[package]
+name = "typewhisper"
+description = "TypeWhisper for Linux: the GTK 4 and libadwaita app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+gtk.workspace = true
+adw.workspace = true
