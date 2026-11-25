@@ -101,6 +101,15 @@ jobs:
         with:
           # Pull requests read the cache that main wrote.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Let sherpa-onnx unpack its libraries again
+        # The sherpa-onnx-sys build script unpacks prebuilt libraries into
+        # target/sherpa-onnx-prebuilt, which the cache does not keep, while its
+        # build state is kept. Cargo then skips the script and links against the
+        # missing folder whenever it rebuilds the crate.
+        run: |
+          if [ ! -d target/sherpa-onnx-prebuilt ]; then
+            rm -rf target/*/build/sherpa-onnx-sys-* target/*/.fingerprint/sherpa-onnx-sys-*
+          fi
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
