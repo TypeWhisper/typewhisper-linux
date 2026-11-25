@@ -8,12 +8,22 @@
 //! A session is opened per insertion and closed right after, because GNOME shows
 //! a remote-control indicator while one is open. The restore token from the first
 //! approval lets later sessions start without a dialog.
+//!
+//! To preserve the clipboard, the session reads what the clipboard holds before
+//! the paste and offers it again afterwards. The desktop fetches it once, as it
+//! does with every new selection, and keeps it after the session closes.
+//!
+//! Where the compositor offers Wayland data-control (KDE Plasma, wlroots), the
+//! clipboard goes through that instead, see [`crate::data_control`], and the
+//! portal session only presses the keys.
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use ashpd::desktop::clipboard::{Clipboard, RequestClipboardOptions, SetSelectionOptions};
+use ashpd::desktop::clipboard::{
+    Clipboard, RequestClipboardOptions, SelectionOwnerChanged, SetSelectionOptions,
+};
 use ashpd::desktop::remote_desktop::{
     DeviceType, KeyState, NotifyKeyboardKeysymOptions, RemoteDesktop, SelectDevicesOptions,
     StartOptions,
@@ -21,7 +31,7 @@ use ashpd::desktop::remote_desktop::{
 use ashpd::desktop::{CreateSessionOptions, PersistMode, Session};
 use ashpd::zbus;
 use async_io::Timer;
-use futures_util::{StreamExt, future, pin_mut};
+use futures_util::{AsyncReadExt, FutureExt, Stream, StreamExt, future, pin_mut};
 
 const KEYSYM_CONTROL_L: i32 = 0xffe3;
 const KEYSYM_V: i32 = 0x76;
@@ -36,9 +46,26 @@ const MIME_TYPES: &[&str] = &[
 const KEY_GAP: Duration = Duration::from_millis(50);
 /// Time the target app gets to fetch the clipboard after Ctrl+V.
 const PASTE_GRACE: Duration = Duration::from_millis(400);
+/// The portal reports the current clipboard owner right after the session starts.
+const OWNER_WAIT: Duration = Duration::from_millis(300);
+/// Longest wait for one clipboard type to be read.
+const READ_TIMEOUT: Duration = Duration::from_millis(500);
+/// Clipboard content larger than this in total is not preserved.
+const SNAPSHOT_LIMIT: u64 = 32 * 1024 * 1024;
+/// How long a late owner report may take once a read showed the clipboard has content.
+const LATE_REPORT_WAIT: Duration = Duration::from_secs(1);
+/// Longest wait for the desktop to fetch the restored content.
+const RESTORE_WAIT: Duration = Duration::from_millis(500);
+/// The restore is done when no further type was fetched for this long.
+const RESTORE_QUIET: Duration = Duration::from_millis(150);
+
+/// The clipboard content before a paste, one entry per MIME type.
+type Snapshot = Vec<(String, Vec<u8>)>;
 
 #[derive(Debug)]
 pub enum InsertError {
+    /// The clipboard could not be set through data-control.
+    Clipboard(String),
     /// The user denied the request or left keyboard or clipboard access switched off.
     NotAllowed(&'static str),
     /// No clipboard request was answered, so the text cannot have arrived.
@@ -50,6 +77,7 @@ impl std::fmt::Display for InsertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InsertError::NotAllowed(what) => write!(f, "{what}"),
+            InsertError::Clipboard(error) => write!(f, "The clipboard could not be set: {error}"),
             InsertError::NotDelivered => {
                 write!(
                     f,
@@ -92,12 +120,103 @@ impl TextInserter {
         Ok(())
     }
 
-    /// Pastes `text` into the focused app.
-    pub async fn insert(&self, text: &str) -> Result<(), InsertError> {
+    /// Pastes `text` into the focused app. With `preserve_clipboard`, the
+    /// clipboard holds its previous content again afterwards.
+    pub async fn insert(&self, text: &str, preserve_clipboard: bool) -> Result<(), InsertError> {
+        if crate::data_control::available().await {
+            return self
+                .insert_with_data_control(text, preserve_clipboard)
+                .await;
+        }
+        // Subscribed before the session starts, so the first report is not missed.
+        let watcher = Clipboard::with_connection(self.connection.clone()).await?;
+        let owners = if preserve_clipboard {
+            Some(watcher.receive_selection_owner_changed().await?)
+        } else {
+            None
+        };
         let (remote, clipboard, session) = self.open().await?;
-        let result = paste(&remote, &clipboard, &session, text.as_bytes()).await;
+        let result = match owners {
+            Some(owners) => {
+                pin_mut!(owners);
+                let saved = snapshot(&clipboard, &session, owners.as_mut()).await;
+                paste(
+                    &remote,
+                    &clipboard,
+                    &session,
+                    text.as_bytes(),
+                    saved.as_ref(),
+                    owners,
+                )
+                .await
+            }
+            None => {
+                paste(
+                    &remote,
+                    &clipboard,
+                    &session,
+                    text.as_bytes(),
+                    None,
+                    futures_util::stream::pending(),
+                )
+                .await
+            }
+        };
         let _ = session.close().await;
         result
+    }
+
+    /// Sets the clipboard through data-control, presses Ctrl+V through the
+    /// portal and, if asked, puts the previous content back. Without a served
+    /// transfer to count, a failed paste cannot be detected here.
+    async fn insert_with_data_control(
+        &self,
+        text: &str,
+        preserve_clipboard: bool,
+    ) -> Result<(), InsertError> {
+        use crate::data_control;
+        // The portal comes first: if it refuses, the clipboard stays untouched.
+        let (remote, _clipboard, session) = self.open().await?;
+        // Read after the portal's dialog, so text copied while it was open counts.
+        let saved = if preserve_clipboard {
+            data_control::snapshot(SNAPSHOT_LIMIT, READ_TIMEOUT * 4).await
+        } else {
+            None
+        };
+        // With the setting on, clipboard managers should not keep the dictation,
+        // as on macOS.
+        let replaced = match data_control::offer_text(text, preserve_clipboard).await {
+            Ok(replaced) => replaced,
+            Err(error) => {
+                let _ = session.close().await;
+                return Err(InsertError::Clipboard(error));
+            }
+        };
+        let pressed = async {
+            press_ctrl_v(&remote, &session).await?;
+            Timer::after(PASTE_GRACE).await;
+            Ok::<(), InsertError>(())
+        }
+        .await;
+        let _ = session.close().await;
+        // The previous content comes back even when the keys failed. If another
+        // app copied something meanwhile, its content stays.
+        let mut restored = Ok(());
+        if preserve_clipboard && !replaced.load(std::sync::atomic::Ordering::Acquire) {
+            match saved {
+                Some(saved) if saved.is_empty() => data_control::clear().await,
+                Some(saved) => {
+                    restored = data_control::offer_snapshot(saved)
+                        .await
+                        .map(|_| ())
+                        .map_err(InsertError::Clipboard);
+                }
+                // Not readable in full: the dictated text stays.
+                None => {}
+            }
+        }
+        pressed?;
+        restored
     }
 
     async fn open(
@@ -161,11 +280,93 @@ impl TextInserter {
     }
 }
 
+/// Reads every type the clipboard offers. `None` when the content cannot be
+/// read in full or is too large; then nothing is restored.
+///
+/// GNOME reports no owner for an empty clipboard. An empty clipboard comes back
+/// as empty text, because an empty selection does not clear it there.
+async fn snapshot(
+    clipboard: &Clipboard,
+    session: &Session<RemoteDesktop>,
+    mut owners: std::pin::Pin<
+        &mut impl Stream<Item = (Session<RemoteDesktop>, SelectionOwnerChanged)>,
+    >,
+) -> Option<Snapshot> {
+    let empty = || {
+        MIME_TYPES
+            .iter()
+            .map(|mime| ((*mime).to_owned(), Vec::new()))
+            .collect()
+    };
+    let first = future::select(owners.next(), Timer::after(OWNER_WAIT)).await;
+    let owner = match first {
+        future::Either::Left((Some((_, owner)), _)) => owner,
+        _ => {
+            // GNOME reports no owner for an empty clipboard and fails a read of
+            // it, while a filled clipboard answers. So a failed read means empty.
+            if clipboard
+                .selection_read(session, MIME_TYPES[0])
+                .await
+                .is_err()
+            {
+                return Some(empty());
+            }
+            // There is content, but only its report lists every type. Without
+            // it, a restore could drop formats, so nothing is restored.
+            match future::select(owners.next(), Timer::after(LATE_REPORT_WAIT)).await {
+                future::Either::Left((Some((_, owner)), _)) => owner,
+                _ => return None,
+            }
+        }
+    };
+    if owner.session_is_owner() == Some(true) {
+        return None;
+    }
+    if owner.mime_types().is_empty() {
+        return Some(empty());
+    }
+    let mut saved = Snapshot::new();
+    let mut total = 0u64;
+    for mime in owner.mime_types() {
+        // A type that cannot be read in full would come back damaged.
+        let bytes = read_selection(clipboard, session, mime, SNAPSHOT_LIMIT - total).await?;
+        total += bytes.len() as u64;
+        saved.push((mime.clone(), bytes));
+    }
+    Some(saved)
+}
+
+/// Reads one clipboard type. `None` when it fails, times out or exceeds `limit`.
+async fn read_selection(
+    clipboard: &Clipboard,
+    session: &Session<RemoteDesktop>,
+    mime: &str,
+    limit: u64,
+) -> Option<Vec<u8>> {
+    let fd = clipboard.selection_read(session, mime).await.ok()?;
+    let file = std::fs::File::from(std::os::fd::OwnedFd::from(fd));
+    let reader = async_io::Async::new(file).ok()?;
+    let mut bytes = Vec::new();
+    let complete = {
+        // One byte more than the limit shows that the content is too large.
+        let mut limited = reader.take(limit + 1);
+        let read = limited.read_to_end(&mut bytes);
+        pin_mut!(read);
+        matches!(
+            future::select(read, Timer::after(READ_TIMEOUT)).await,
+            future::Either::Left((Ok(_), _))
+        )
+    };
+    (complete && bytes.len() as u64 <= limit).then_some(bytes)
+}
+
 async fn paste(
     remote: &RemoteDesktop,
     clipboard: &Clipboard,
     session: &Session<RemoteDesktop>,
     bytes: &[u8],
+    saved: Option<&Snapshot>,
+    owners: impl Stream<Item = (Session<RemoteDesktop>, SelectionOwnerChanged)>,
 ) -> Result<(), InsertError> {
     let mut transfers = std::pin::pin!(
         clipboard
@@ -182,18 +383,33 @@ async fn paste(
     // The compositor asks for the data right away and again when the target
     // pastes, so transfers are served while the keys are pressed.
     let delivered = std::cell::Cell::new(false);
+    let restoring = std::cell::Cell::new(false);
+    let restored = Restored::default();
     let serve = async {
         // Portals send session signals only to the session's owner, and this
         // connection has no other remote desktop session open.
-        while let Some((_, _mime, serial)) = transfers.next().await {
-            let written = match clipboard.selection_write(session, serial).await {
-                Ok(fd) => std::fs::File::from(std::os::fd::OwnedFd::from(fd))
-                    .write_all(bytes)
+        while let Some((_, mime, serial)) = transfers.next().await {
+            let data = if restoring.get() {
+                saved
+                    .into_iter()
+                    .flatten()
+                    .find(|(saved_mime, _)| *saved_mime == mime)
+                    .map(|(_, data)| data.as_slice())
+            } else {
+                Some(bytes)
+            };
+            let written = match (data, clipboard.selection_write(session, serial).await) {
+                (Some(data), Ok(fd)) => std::fs::File::from(std::os::fd::OwnedFd::from(fd))
+                    .write_all(data)
                     .is_ok(),
-                Err(_) => false,
+                _ => false,
             };
             if written {
-                delivered.set(true);
+                if restoring.get() {
+                    restored.served(mime);
+                } else {
+                    delivered.set(true);
+                }
             }
             let _ = clipboard
                 .selection_write_done(session, serial, written)
@@ -201,24 +417,13 @@ async fn paste(
         }
     };
     let press = async {
-        Timer::after(KEY_GAP * 2).await;
-        for (keysym, state) in [
-            (KEYSYM_CONTROL_L, KeyState::Pressed),
-            (KEYSYM_V, KeyState::Pressed),
-            (KEYSYM_V, KeyState::Released),
-            (KEYSYM_CONTROL_L, KeyState::Released),
-        ] {
-            remote
-                .notify_keyboard_keysym(
-                    session,
-                    keysym,
-                    state,
-                    NotifyKeyboardKeysymOptions::default(),
-                )
-                .await?;
-            Timer::after(KEY_GAP).await;
-        }
+        press_ctrl_v(remote, session).await?;
         Timer::after(PASTE_GRACE).await;
+        if let Some(saved) = saved
+            && !taken_by_another_app(owners)
+        {
+            restore(clipboard, session, saved, &restoring, &restored).await?;
+        }
         Ok::<(), InsertError>(())
     };
     pin_mut!(serve, press);
@@ -232,6 +437,91 @@ async fn paste(
         Ok(())
     } else {
         Err(InsertError::NotDelivered)
+    }
+}
+
+/// Presses Ctrl+V on the portal's virtual keyboard, with gaps between the keys.
+async fn press_ctrl_v(
+    remote: &RemoteDesktop,
+    session: &Session<RemoteDesktop>,
+) -> Result<(), InsertError> {
+    Timer::after(KEY_GAP * 2).await;
+    for (keysym, state) in [
+        (KEYSYM_CONTROL_L, KeyState::Pressed),
+        (KEYSYM_V, KeyState::Pressed),
+        (KEYSYM_V, KeyState::Released),
+        (KEYSYM_CONTROL_L, KeyState::Released),
+    ] {
+        remote
+            .notify_keyboard_keysym(
+                session,
+                keysym,
+                state,
+                NotifyKeyboardKeysymOptions::default(),
+            )
+            .await?;
+        Timer::after(KEY_GAP).await;
+    }
+    Ok(())
+}
+
+/// True when another app has taken the clipboard since the paste, as the
+/// owner reports that arrived in the meantime show. Its content then stays.
+fn taken_by_another_app(
+    owners: impl Stream<Item = (Session<RemoteDesktop>, SelectionOwnerChanged)>,
+) -> bool {
+    pin_mut!(owners);
+    let mut taken = false;
+    while let Some(Some((_, owner))) = owners.next().now_or_never() {
+        taken = owner.session_is_owner() == Some(false);
+    }
+    taken
+}
+
+/// Offers the saved content and waits until the desktop has fetched it once.
+async fn restore(
+    clipboard: &Clipboard,
+    session: &Session<RemoteDesktop>,
+    saved: &Snapshot,
+    restoring: &std::cell::Cell<bool>,
+    restored: &Restored,
+) -> Result<(), InsertError> {
+    let mimes: Vec<&str> = saved.iter().map(|(mime, _)| mime.as_str()).collect();
+    restoring.set(true);
+    clipboard
+        .set_selection(
+            session,
+            SetSelectionOptions::default().set_mime_types(&mimes),
+        )
+        .await?;
+    let started = std::time::Instant::now();
+    while !restored.done(mimes.len()) && started.elapsed() < RESTORE_WAIT {
+        Timer::after(Duration::from_millis(20)).await;
+    }
+    Ok(())
+}
+
+/// Which restored types the desktop has fetched, and when it last fetched one.
+#[derive(Default)]
+struct Restored {
+    types: std::cell::RefCell<std::collections::HashSet<String>>,
+    last: std::cell::Cell<Option<std::time::Instant>>,
+}
+
+impl Restored {
+    fn served(&self, mime: String) {
+        self.types.borrow_mut().insert(mime);
+        self.last.set(Some(std::time::Instant::now()));
+    }
+
+    /// Every type was fetched, or some were and no further request followed.
+    /// GNOME's clipboard manager may fetch only one of them.
+    fn done(&self, offered: usize) -> bool {
+        self.types.borrow().len() >= offered
+            || self
+                .last
+                .get()
+                .is_some_and(|last| last.elapsed() >= RESTORE_QUIET)
     }
 }
 
