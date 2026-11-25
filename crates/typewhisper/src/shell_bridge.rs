@@ -1,6 +1,6 @@
 //! D-Bus side of the TypeWhisper GNOME Shell extension and of the KWin script.
 //!
-//! The extension draws the dictation indicator from `StateChanged` and reports
+//! The extension draws the dictation indicator from `StateChanged` and `Level` and reports
 //! the focused app with `FocusChanged`. It only talks to the owner of the app's
 //! bus name, which GApplication claims at startup. On KDE Plasma, the script
 //! from [`crate::kwin_script`] reports the active window with `WindowActivated`.
@@ -30,6 +30,10 @@ const XML: &str = r#"<node>
       <arg type="u" name="version"/>
       <arg type="s" name="state"/>
       <arg type="s" name="text"/>
+    </signal>
+    <signal name="Level">
+      <arg type="u" name="version"/>
+      <arg type="d" name="level"/>
     </signal>
   </interface>
 </node>"#;
@@ -100,6 +104,18 @@ impl ShellBridge {
             INTERFACE,
             "StateChanged",
             Some(&(PROTOCOL_VERSION, state, text).to_variant()),
+        );
+    }
+
+    /// The input level while recording, from 0 to 1, 30 times a second. An
+    /// extension that does not know the signal ignores it.
+    pub fn set_level(&self, level: f32) {
+        let _ = self.connection.emit_signal(
+            None,
+            PATH,
+            INTERFACE,
+            "Level",
+            Some(&(PROTOCOL_VERSION, f64::from(level)).to_variant()),
         );
     }
 
