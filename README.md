@@ -16,7 +16,7 @@ comes from a [platform spike](docs/spike-2026-11.md) on GNOME 51 and Plasma 6.8.
 
 | Path | Contents |
 | --- | --- |
-| `crates/typewhisper` | The GTK 4 and libadwaita app |
+| `crates/typewhisper` | The GTK 4 and libadwaita app, and the indicator overlay on KDE Plasma and other compositors with wlr-layer-shell |
 | `crates/tw-platform` | Desktop services: microphone capture, global shortcut, pasting through the portals |
 | `crates/tw-formats` | Formats shared with the macOS, Windows and iOS apps, with conformance tests against fixtures written by the Mac app |
 | `crates/tw-plugin-protocol` | Wire protocol between the app and plugin processes |
@@ -39,13 +39,13 @@ packages.
 Fedora:
 
 ```sh
-sudo dnf install gcc gcc-c++ cargo rust gtk4-devel libadwaita-devel pulseaudio-libs-devel
+sudo dnf install gcc gcc-c++ cargo rust gtk4-devel gtk4-layer-shell-devel libadwaita-devel pulseaudio-libs-devel
 cargo build --workspace
 cargo test --workspace
 cargo run -p typewhisper
 ```
 
-Ubuntu 26.04: install `build-essential libgtk-4-dev libadwaita-1-dev libpulse-dev`
+Ubuntu 26.04: install `build-essential libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev libpulse-dev`
 and Rust through rustup.
 
 To dictate with a development build, install it for your user first:
