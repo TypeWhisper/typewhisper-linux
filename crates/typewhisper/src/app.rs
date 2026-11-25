@@ -12,6 +12,7 @@ use gtk::{gio, glib};
 use serde_json::{Value, json};
 use tw_platform::audio::{Recorder, SAMPLE_RATE};
 use tw_platform::insert::TextInserter;
+use tw_platform::settings::{self, Settings};
 use tw_platform::shortcuts::{self, BoundShortcut, Command, PressInterpreter};
 use tw_platform::zbus;
 use tw_plugin_host::{PluginError, PluginProcess, discover, plugin_dirs};
@@ -54,6 +55,7 @@ struct Ui {
     model_ready: gtk::Box,
     last_group: adw::PreferencesGroup,
     last_row: adw::ActionRow,
+    preserve_clipboard: adw::SwitchRow,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -107,6 +109,7 @@ struct State {
 struct App {
     ui: Ui,
     state: RefCell<State>,
+    settings: RefCell<Settings>,
 }
 
 pub fn startup(application: &adw::Application) {
@@ -139,6 +142,9 @@ pub fn startup(application: &adw::Application) {
     let bridge = application
         .dbus_connection()
         .and_then(|c| ShellBridge::register(c).ok());
+    let settings = Settings::load();
+    ui.preserve_clipboard
+        .set_active(settings.bool(settings::PRESERVE_CLIPBOARD, false));
     let app = Rc::new(App {
         ui,
         state: RefCell::new(State {
@@ -146,6 +152,7 @@ pub fn startup(application: &adw::Application) {
             starting: true,
             ..Default::default()
         }),
+        settings: RefCell::new(settings),
     });
     app.refresh_model();
     app.refresh_typing_row();
@@ -172,6 +179,21 @@ pub fn startup(application: &adw::Application) {
             glib::spawn_future_local(download_model(Rc::clone(&app)));
         }
     ));
+    app.ui
+        .preserve_clipboard
+        .connect_active_notify(glib::clone!(
+            #[weak]
+            app,
+            move |row| {
+                let saved = app
+                    .settings
+                    .borrow_mut()
+                    .set_bool(settings::PRESERVE_CLIPBOARD, row.is_active());
+                if let Err(error) = saved {
+                    app.toast(&format!("The setting could not be saved: {error}"));
+                }
+            }
+        ));
     glib::spawn_future_local(initialize(app));
 }
 
@@ -326,12 +348,24 @@ fn build_ui(application: &adw::Application) -> Ui {
         .build();
     last_group.add(&last_row);
 
+    let preserve_clipboard = adw::SwitchRow::builder()
+        .title("Preserve clipboard content")
+        .subtitle(
+            "Restores your clipboard after text insertion. Without this, your clipboard \
+             contains the transcribed text after dictation.",
+        )
+        .build();
+    preserve_clipboard.add_prefix(&gtk::Image::from_icon_name("edit-copy-symbolic"));
+    let clipboard = adw::PreferencesGroup::builder().title("Clipboard").build();
+    clipboard.add(&preserve_clipboard);
+
     let page = adw::PreferencesPage::new();
     page.add(&status);
     page.add(&last_group);
     page.add(&permissions);
     page.add(&hotkey);
     page.add(&engine);
+    page.add(&clipboard);
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&page));
 
@@ -382,6 +416,7 @@ fn build_ui(application: &adw::Application) -> Ui {
         model_ready,
         last_group,
         last_row,
+        preserve_clipboard,
     }
 }
 
@@ -946,7 +981,11 @@ fn stop_recording(app: Rc<App>) {
                 app.ui.last_group.set_visible(true);
                 match inserter {
                     Some(inserter) => {
-                        let inserted = inserter.insert(&text).await;
+                        let preserve = app
+                            .settings
+                            .borrow()
+                            .bool(settings::PRESERVE_CLIPBOARD, false);
+                        let inserted = inserter.insert(&text, preserve).await;
                         app.refresh_typing_row();
                         match inserted {
                             Ok(()) => {

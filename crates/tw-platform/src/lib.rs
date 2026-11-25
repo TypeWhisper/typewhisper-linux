@@ -4,8 +4,10 @@
 //! portals, so the same code works on GNOME and KDE Plasma and inside Flatpak.
 
 pub mod audio;
+pub mod data_control;
 pub mod insert;
 pub mod portal;
+pub mod settings;
 pub mod shortcuts;
 
 /// The D-Bus library the portal types use, for callers that hold a connection.
@@ -21,6 +23,11 @@ pub fn state_dir() -> std::io::Result<PathBuf> {
 /// `$XDG_DATA_HOME/typewhisper`, created on first use.
 pub fn data_dir() -> std::io::Result<PathBuf> {
     xdg_dir("XDG_DATA_HOME", ".local/share")
+}
+
+/// `$XDG_CONFIG_HOME/typewhisper`, created on first use.
+pub fn config_dir() -> std::io::Result<PathBuf> {
+    xdg_dir("XDG_CONFIG_HOME", ".config")
 }
 
 /// The XDG base directory spec treats empty and relative values as unset.
