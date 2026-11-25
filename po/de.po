@@ -73,6 +73,10 @@ msgid "The setting could not be saved: {error}"
 msgstr "Die Einstellung konnte nicht gespeichert werden: {error}"
 
 #: crates/typewhisper/src/app.rs
+msgid "Source Code"
+msgstr "Quellcode"
+
+#: crates/typewhisper/src/app.rs
 msgid "Keyboard and Clipboard Access"
 msgstr "Zugriff auf Tastatur und Zwischenablage"
 
@@ -155,6 +159,10 @@ msgstr "Entfernt einen vom Modell angehängten Punkt, wenn eine diktierte E-Mail
 #: crates/typewhisper/src/app.rs
 msgid "Output Formatting"
 msgstr "Ausgabe-Formatierung"
+
+#: crates/typewhisper/src/app.rs
+msgid "About TypeWhisper"
+msgstr "Über TypeWhisper"
 
 #: crates/typewhisper/src/app.rs
 msgid "Quit"

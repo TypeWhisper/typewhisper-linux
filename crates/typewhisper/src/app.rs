@@ -181,6 +181,13 @@ pub fn startup(application: &adw::Application) {
             glib::spawn_future_local(bind_shortcut(Rc::clone(&app)));
         }
     ));
+    let about = gio::SimpleAction::new("about", None);
+    about.connect_activate(glib::clone!(
+        #[weak]
+        app,
+        move |_, _| show_about(&app.ui.window)
+    ));
+    application.add_action(&about);
     app.ui.typing_button.connect_clicked(glib::clone!(
         #[strong]
         app,
@@ -266,6 +273,24 @@ async fn start_kwin_script(app: Rc<App>, connection: gio::DBusConnection) {
         app.state.borrow_mut().kwin_script = false;
         eprintln!("typewhisper: KWin does not report the active window: {error}");
     }
+}
+
+/// The About dialog. Like the macOS app's About panel, it names the app and
+/// its version; the links and the license are the ones GNOME apps show.
+fn show_about(window: &adw::ApplicationWindow) {
+    let dialog = adw::AboutDialog::builder()
+        .application_name("TypeWhisper")
+        .application_icon(APP_ID)
+        .version(env!("CARGO_PKG_VERSION"))
+        .website("https://typewhisper.com")
+        .issue_url("https://github.com/TypeWhisper/typewhisper-linux/issues")
+        .license_type(gtk::License::Gpl30)
+        .build();
+    dialog.add_link(
+        &tr("Source Code"),
+        "https://github.com/TypeWhisper/typewhisper-linux",
+    );
+    dialog.present(Some(window));
 }
 
 /// Shows a setting in a switch row and saves every change right away.
@@ -504,6 +529,7 @@ fn build_ui(application: &adw::Application) -> Ui {
     toasts.set_child(Some(&page));
 
     let menu = gio::Menu::new();
+    menu.append(Some(&tr("About TypeWhisper")), Some("app.about"));
     menu.append(Some(&tr("Quit")), Some("app.quit"));
     let header = adw::HeaderBar::new();
     header.pack_end(

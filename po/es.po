@@ -73,6 +73,10 @@ msgid "The setting could not be saved: {error}"
 msgstr "No se pudo guardar el ajuste: {error}"
 
 #: crates/typewhisper/src/app.rs
+msgid "Source Code"
+msgstr "Código fuente"
+
+#: crates/typewhisper/src/app.rs
 msgid "Keyboard and Clipboard Access"
 msgstr "Acceso al teclado y al portapapeles"
 
@@ -155,6 +159,10 @@ msgstr "Quita el punto que añade el modelo cuando se inserta por sí solo un co
 #: crates/typewhisper/src/app.rs
 msgid "Output Formatting"
 msgstr "Formato del texto de salida"
+
+#: crates/typewhisper/src/app.rs
+msgid "About TypeWhisper"
+msgstr "Acerca de TypeWhisper"
 
 #: crates/typewhisper/src/app.rs
 msgid "Quit"
