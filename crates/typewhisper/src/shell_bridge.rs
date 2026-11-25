@@ -1,8 +1,9 @@
-//! D-Bus side of the TypeWhisper GNOME Shell extension.
+//! D-Bus side of the TypeWhisper GNOME Shell extension and of the KWin script.
 //!
 //! The extension draws the dictation indicator from `StateChanged` and reports
 //! the focused app with `FocusChanged`. It only talks to the owner of the app's
-//! bus name, which GApplication claims at startup.
+//! bus name, which GApplication claims at startup. On KDE Plasma, the script
+//! from [`crate::kwin_script`] reports the active window with `WindowActivated`.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -18,6 +19,10 @@ const XML: &str = r#"<node>
   <interface name="com.typewhisper.TypeWhisper.Shell">
     <method name="FocusChanged">
       <arg type="u" name="version" direction="in"/>
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="title" direction="in"/>
+    </method>
+    <method name="WindowActivated">
       <arg type="s" name="app_id" direction="in"/>
       <arg type="s" name="title" direction="in"/>
     </method>
@@ -39,6 +44,8 @@ pub struct ShellBridge {
     connection: gio::DBusConnection,
     _registration: gio::RegistrationId,
     focused: Rc<RefCell<FocusedApp>>,
+    /// KWin's unique bus name once the script runs; other senders are ignored.
+    kwin: Rc<RefCell<Option<String>>>,
 }
 
 impl ShellBridge {
@@ -46,14 +53,25 @@ impl ShellBridge {
         let node = gio::DBusNodeInfo::for_xml(XML)?;
         let interface = node.lookup_interface(INTERFACE).expect("interface in XML");
         let focused = Rc::new(RefCell::new(FocusedApp::default()));
+        let kwin = Rc::new(RefCell::new(None::<String>));
         let target = Rc::clone(&focused);
+        let script_sender = Rc::clone(&kwin);
         let registration = connection
             .register_object(PATH, &interface)
-            .method_call(move |_, _sender, _, _, method, params, invocation| {
-                if method == "FocusChanged"
-                    && let Some((version, app_id, title)) = params.get::<(u32, String, String)>()
-                    && version == PROTOCOL_VERSION
-                {
+            .method_call(move |_, sender, _, _, method, params, invocation| {
+                let report = match method {
+                    "FocusChanged" => params
+                        .get::<(u32, String, String)>()
+                        .filter(|(version, _, _)| *version == PROTOCOL_VERSION)
+                        .map(|(_, app_id, title)| (app_id, title)),
+                    "WindowActivated"
+                        if sender.is_some() && sender == script_sender.borrow().as_deref() =>
+                    {
+                        params.get::<(String, String)>()
+                    }
+                    _ => None,
+                };
+                if let Some((app_id, title)) = report {
                     *target.borrow_mut() = FocusedApp { app_id, title };
                 }
                 invocation.return_value(None);
@@ -63,7 +81,13 @@ impl ShellBridge {
             connection,
             _registration: registration,
             focused,
+            kwin,
         })
+    }
+
+    /// Accepts `WindowActivated` from this unique bus name, KWin's.
+    pub fn accept_kwin_reports(&self, sender: String) {
+        *self.kwin.borrow_mut() = Some(sender);
     }
 
     /// `state` is `idle`, `recording`, `processing`, `inserting` or `error`.

@@ -1,22 +1,24 @@
-//! The text around the cursor of the focused field, read through AT-SPI.
+//! The focused field or terminal and the text around the cursor, read through
+//! AT-SPI.
 //!
-//! Right before an insertion, [`FocusedField::context`] looks for the active
-//! window on the accessibility bus, finds the focused object in it and reads
-//! that object's selection and the text around it. A focused object that is
-//! not editable, TypeWhisper's own window, or an app that does not answer in
-//! time gives no context, and the dictation is then inserted unchanged.
+//! Right before an insertion, [`FocusedField::focus`] looks for the active
+//! window on the accessibility bus and finds the focused object in it. For an
+//! editable field it reads the selection and the text around it; a terminal
+//! gets Ctrl+Shift+V instead of Ctrl+V and no context. A focused object that
+//! is neither, TypeWhisper's own window, or an app that does not answer in time
+//! gives no context, and the dictation is then inserted unchanged.
 //!
 //! The search asks the apps for their objects instead of listening for focus
 //! events: registering an event listener switches on the desktop's
 //! accessibility support (`org.a11y.Status.IsEnabled`) for every app, which
 //! TypeWhisper leaves to the user. GTK apps publish their objects anyway. Qt,
 //! Firefox and Chromium do so only while accessibility is on, for example while
-//! a screen reader runs. Inside Flatpak, the accessibility bus is filtered so
-//! that an app sees no other app, so there is no context there.
+//! a screen reader runs. Inside Flatpak, the app connects to the real bus
+//! instead of the filtered one, see `bus_address`.
 
 use std::future::Future;
 use std::ops::Range;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ashpd::zbus;
 use async_io::Timer;
@@ -42,6 +44,8 @@ const STATE_ACTIVE: u32 = 1;
 const STATE_EDITABLE: u32 = 7;
 const STATE_FOCUSED: u32 = 12;
 const STATE_SHOWING: u32 = 25;
+/// `ATSPI_ROLE_TERMINAL`.
+const ROLE_TERMINAL: u32 = 60;
 
 /// The text of the focused field around its selection.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +54,19 @@ pub struct InsertionContext {
     pub value: String,
     /// The selection in characters of `value`; the caret is an empty range.
     pub selection: Range<usize>,
+}
+
+/// What has the keyboard focus in the active window, as far as AT-SPI shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Focus {
+    /// No focused field or terminal shows, for example because the app
+    /// publishes no objects or one of TypeWhisper's own windows is active.
+    Unknown,
+    /// An editable field, with the text around its selection when that was
+    /// asked for and could be read.
+    Field(Option<InsertionContext>),
+    /// A terminal. Its text is the screen, not a field, so there is no context.
+    Terminal,
 }
 
 /// An accessible object: the app's name on the bus and the object's path.
@@ -69,13 +86,24 @@ impl FocusedField {
         Ok(Self { connection })
     }
 
-    /// Reads the selection and the text around it from the focused field.
-    pub async fn context(&self) -> Option<InsertionContext> {
-        within(READ_TIMEOUT, async {
-            let field = focused_field(&self.connection).await?;
-            read_context(&self.connection, &field).await
-        })
-        .await
+    /// Finds the focused field or terminal. With `with_context`, also reads a
+    /// field's selection and the text around it.
+    pub async fn focus(&self, with_context: bool) -> Focus {
+        let deadline = Instant::now() + READ_TIMEOUT;
+        let Some((object, terminal)) = within(READ_TIMEOUT, focused_object(&self.connection)).await
+        else {
+            return Focus::Unknown;
+        };
+        if terminal {
+            return Focus::Terminal;
+        }
+        let context = if with_context {
+            let left = deadline.saturating_duration_since(Instant::now());
+            within(left, read_context(&self.connection, &object)).await
+        } else {
+            None
+        };
+        Focus::Field(context)
     }
 }
 
@@ -109,9 +137,10 @@ async fn bus_address(session: &zbus::Connection) -> zbus::Result<String> {
     }
 }
 
-/// The focused editable object in the active window. `None` while one of
-/// TypeWhisper's own windows is active, since the paste then goes there.
-async fn focused_field(connection: &zbus::Connection) -> Option<Object> {
+/// The focused editable object or terminal in the active window, and whether
+/// it is a terminal. `None` while one of TypeWhisper's own windows is active,
+/// since the paste then goes there.
+async fn focused_object(connection: &zbus::Connection) -> Option<(Object, bool)> {
     let desktop = (DESKTOP.to_owned(), DESKTOP_PATH.try_into().ok()?);
     let apps: Vec<Object> = call(connection, &desktop, ACCESSIBLE, "GetChildren", &())
         .await
@@ -123,8 +152,8 @@ async fn focused_field(connection: &zbus::Connection) -> Option<Object> {
         if process_id(connection, &window.0).await == Some(own) {
             return None;
         }
-        if let Some(field) = focused_field_in(connection, window).await {
-            return Some(field);
+        if let Some(found) = focused_object_in(connection, window).await {
+            return Some(found);
         }
     }
     None
@@ -152,11 +181,15 @@ async fn active_windows(connection: &zbus::Connection, app: &Object) -> Vec<Obje
     .unwrap_or_default()
 }
 
-/// Searches the window level by level for a focused, editable object, asking
-/// for all objects of a level at once. Hidden objects are skipped with their
-/// children. Qt marks the containers around the focus as focused too, so a
-/// focused object that is not editable does not end the search.
-async fn focused_field_in(connection: &zbus::Connection, window: Object) -> Option<Object> {
+/// Searches the window level by level for a focused object that is editable or
+/// a terminal, asking for all objects of a level at once. Hidden objects are
+/// skipped with their children. Qt marks the containers around the focus as
+/// focused too, so another focused object does not end the search. VTE marks
+/// its terminals focused but not editable.
+async fn focused_object_in(
+    connection: &zbus::Connection,
+    window: Object,
+) -> Option<(Object, bool)> {
     let mut level = vec![window];
     let mut searched = 0;
     while !level.is_empty() && searched < SEARCH_LIMIT {
@@ -165,8 +198,13 @@ async fn focused_field_in(connection: &zbus::Connection, window: Object) -> Opti
         let mut showing = Vec::new();
         for (object, states) in level.into_iter().zip(states) {
             let Some(states) = states else { continue };
-            if has_state(&states, STATE_FOCUSED) && has_state(&states, STATE_EDITABLE) {
-                return Some(object);
+            if has_state(&states, STATE_FOCUSED) {
+                if role(connection, &object).await == Some(ROLE_TERMINAL) {
+                    return Some((object, true));
+                }
+                if has_state(&states, STATE_EDITABLE) {
+                    return Some((object, false));
+                }
             }
             if has_state(&states, STATE_SHOWING) {
                 showing.push(object);
@@ -182,6 +220,12 @@ async fn children(connection: &zbus::Connection, object: &Object) -> Vec<Object>
     call(connection, object, ACCESSIBLE, "GetChildren", &())
         .await
         .unwrap_or_default()
+}
+
+async fn role(connection: &zbus::Connection, object: &Object) -> Option<u32> {
+    call(connection, object, ACCESSIBLE, "GetRole", &())
+        .await
+        .ok()
 }
 
 async fn states(connection: &zbus::Connection, object: &Object) -> Option<Vec<u32>> {

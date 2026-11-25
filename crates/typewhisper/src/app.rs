@@ -10,9 +10,9 @@ use adw::prelude::*;
 use futures_util::StreamExt;
 use gtk::{gio, glib};
 use serde_json::{Value, json};
-use tw_platform::accessibility::FocusedField;
+use tw_platform::accessibility::{Focus, FocusedField};
 use tw_platform::audio::{Recorder, SAMPLE_RATE};
-use tw_platform::insert::TextInserter;
+use tw_platform::insert::{PasteKeys, TextInserter};
 use tw_platform::settings::{self, Settings};
 use tw_platform::shortcuts::{self, BoundShortcut, Command, PressInterpreter};
 use tw_platform::zbus;
@@ -20,8 +20,10 @@ use tw_plugin_host::{PluginError, PluginProcess, discover, plugin_dirs};
 
 use crate::APP_ID;
 use crate::formatting;
+use crate::kwin_script;
 use crate::overlay::Overlay;
 use crate::shell_bridge::ShellBridge;
+use crate::terminals::{self, TerminalApps};
 
 const PARAKEET: &str = "com.typewhisper.parakeet";
 const SHORTCUT_DESCRIPTION: &str = "Start and stop dictation";
@@ -60,6 +62,7 @@ struct Ui {
     last_group: adw::PreferencesGroup,
     last_row: adw::ActionRow,
     preserve_clipboard: adw::SwitchRow,
+    terminal_apps: adw::PreferencesGroup,
     app_formatting: adw::SwitchRow,
     standalone_value_period: adw::SwitchRow,
 }
@@ -96,7 +99,8 @@ enum Phase {
 struct State {
     connection: Option<zbus::Connection>,
     inserter: Option<Rc<TextInserter>>,
-    /// Reads the text around the cursor for app-aware formatting.
+    /// Finds the focused field or terminal and reads the text around the
+    /// cursor for app-aware formatting.
     focused_field: Option<Rc<FocusedField>>,
     shortcut: Option<BoundShortcut>,
     interpreter: PressInterpreter,
@@ -114,6 +118,9 @@ struct State {
     bridge: Option<ShellBridge>,
     /// The indicator on desktops with a layer shell; GNOME has the extension.
     overlay: Option<Overlay>,
+    terminal_apps: Option<Rc<TerminalApps>>,
+    /// True while KWin runs the script that reports the active window.
+    kwin_script: bool,
 }
 
 struct App {
@@ -202,7 +209,57 @@ pub fn startup(application: &adw::Application) {
     ] {
         bind_setting(&app, row, key, default);
     }
+    let saved = app.settings.borrow().strings(settings::TERMINAL_APPS);
+    let terminal_apps = TerminalApps::new(
+        &app.ui.terminal_apps,
+        saved,
+        glib::clone!(
+            #[weak]
+            app,
+            move |app_ids| {
+                let saved = app
+                    .settings
+                    .borrow_mut()
+                    .set_strings(settings::TERMINAL_APPS, app_ids);
+                if let Err(error) = saved {
+                    app.toast(&format!("The setting could not be saved: {error}"));
+                }
+            }
+        ),
+    );
+    app.state.borrow_mut().terminal_apps = Some(terminal_apps);
+    application.connect_shutdown(glib::clone!(
+        #[weak]
+        app,
+        move |application| {
+            if app.state.borrow().kwin_script
+                && let Some(connection) = application.dbus_connection()
+            {
+                kwin_script::unload(&connection);
+            }
+        }
+    ));
+    if let Some(connection) = application.dbus_connection() {
+        glib::spawn_future_local(start_kwin_script(Rc::clone(&app), connection));
+    }
     glib::spawn_future_local(initialize(app));
+}
+
+/// On KDE Plasma, has KWin report the active window, so that terminals without
+/// AT-SPI objects, such as Konsole, are recognized.
+async fn start_kwin_script(app: Rc<App>, connection: gio::DBusConnection) {
+    let Some(kwin) = kwin_script::kwin_name(&connection).await else {
+        return;
+    };
+    // Accepted before the script starts, so its first report counts.
+    match app.state.borrow().bridge.as_ref() {
+        Some(bridge) => bridge.accept_kwin_reports(kwin),
+        None => return,
+    }
+    match kwin_script::load(&connection).await {
+        Ok(()) => app.state.borrow_mut().kwin_script = true,
+        Err(error) => eprintln!("typewhisper: KWin does not report the active window: {error}"),
+    }
 }
 
 /// Shows a setting in a switch row and saves every change right away.
@@ -388,6 +445,12 @@ fn build_ui(application: &adw::Application) -> Ui {
     let clipboard = adw::PreferencesGroup::builder().title("Clipboard").build();
     clipboard.add(&preserve_clipboard);
 
+    // Filled once the settings are loaded, see `TerminalApps`.
+    let terminal_apps = adw::PreferencesGroup::builder()
+        .title("Terminal Apps")
+        .description(terminals::DESCRIPTION)
+        .build();
+
     let app_formatting = switch_row(
         "App-aware formatting",
         "When enabled, TypeWhisper uses target-app rules and available cursor context \
@@ -414,6 +477,7 @@ fn build_ui(application: &adw::Application) -> Ui {
     page.add(&hotkey);
     page.add(&engine);
     page.add(&clipboard);
+    page.add(&terminal_apps);
     page.add(&formatting);
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&page));
@@ -467,6 +531,7 @@ fn build_ui(application: &adw::Application) -> Ui {
         last_group,
         last_row,
         preserve_clipboard,
+        terminal_apps,
         app_formatting,
         standalone_value_period,
     }
@@ -543,7 +608,17 @@ impl App {
         self.indicator_feedback("error", text, ERROR_FEEDBACK);
     }
 
-    /// The app the last text went to, when the GNOME Shell extension reports it.
+    /// True when the app the desktop reports as focused is a terminal.
+    fn focused_app_is_terminal(&self) -> bool {
+        let Some(focused) = self.state.borrow().bridge.as_ref().map(|b| b.focused_app()) else {
+            return false;
+        };
+        let added = self.settings.borrow().strings(settings::TERMINAL_APPS);
+        terminals::is_terminal(&focused.app_id, &added)
+    }
+
+    /// The app the last text went to, when the GNOME Shell extension or the
+    /// KWin script reports it.
     fn focused_target(&self) -> String {
         let focused = self
             .state
@@ -796,12 +871,13 @@ async fn initialize(app: Rc<App>) {
     start_plugin(Rc::clone(&app)).await;
 }
 
-/// Connects to the accessibility bus for app-aware formatting. Without it,
-/// dictations are inserted unchanged.
+/// Connects to the accessibility bus for app-aware formatting and terminals.
+/// Without it, dictations are inserted unchanged, and only the app the desktop
+/// reports tells a terminal apart.
 async fn connect_focused_field(app: Rc<App>, session: zbus::Connection) {
     match FocusedField::connect(&session).await {
         Ok(field) => app.state.borrow_mut().focused_field = Some(Rc::new(field)),
-        Err(error) => eprintln!("typewhisper: no cursor context for formatting: {error}"),
+        Err(error) => eprintln!("typewhisper: no accessibility bus: {error}"),
     }
 }
 
@@ -1055,13 +1131,22 @@ fn stop_recording(app: Rc<App>) {
                                 stored.bool(settings::STRIP_STANDALONE_VALUE_PERIOD, true),
                             )
                         };
+                        // While TypeWhisper's own window is active, the paste goes there.
+                        let own_window = app.ui.window.is_active();
                         let field = app.state.borrow().focused_field.clone();
-                        let context = match field {
-                            // The paste goes to TypeWhisper's own window then.
-                            Some(field) if app_formatting && !app.ui.window.is_active() => {
-                                field.context().await
-                            }
-                            _ => None,
+                        let focus = match field {
+                            Some(field) if !own_window => field.focus(app_formatting).await,
+                            _ => Focus::Unknown,
+                        };
+                        let terminal = match &focus {
+                            Focus::Terminal => true,
+                            Focus::Field(_) => false,
+                            // The app shows nothing over AT-SPI: ask the desktop.
+                            Focus::Unknown => !own_window && app.focused_app_is_terminal(),
+                        };
+                        let context = match focus {
+                            Focus::Field(context) => context,
+                            Focus::Terminal | Focus::Unknown => None,
                         };
                         let formatted = formatting::text_for_insertion(
                             &text,
@@ -1069,7 +1154,12 @@ fn stop_recording(app: Rc<App>) {
                             app_formatting,
                             standalone_value_period,
                         );
-                        let inserted = inserter.insert(&formatted, preserve).await;
+                        let keys = if terminal {
+                            PasteKeys::ControlShiftV
+                        } else {
+                            PasteKeys::ControlV
+                        };
+                        let inserted = inserter.insert(&formatted, preserve, keys).await;
                         app.refresh_typing_row();
                         match inserted {
                             Ok(()) => {
