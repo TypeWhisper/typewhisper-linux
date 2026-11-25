@@ -54,3 +54,9 @@
   font-size: 13px;
   color: rgba(255, 255, 255, 0.7);
 }
+
+/* Five bars of 3 px with 2 px between them, up to 16 px high. */
+.tw-waveform {
+  width: 23px;
+  height: 16px;
+}

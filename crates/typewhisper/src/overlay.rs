@@ -6,12 +6,16 @@
 //! pill with the same states, as a layer surface above all windows that takes
 //! neither the keyboard focus nor clicks.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::f64::consts::PI;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gtk::prelude::*;
 use gtk::{cairo, gdk, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+
+use crate::waveform::{self, BarModel};
 
 /// Distance from the bottom of the area that panels leave free.
 const EDGE_INSET: i32 = 20;
@@ -82,12 +86,13 @@ const STATES: [&str; 4] = ["recording", "processing", "inserting", "error"];
 
 /// What the pill shows in a state, as in the GNOME Shell extension. Left:
 /// what is happening (dot, spinner or icon) and, while recording, the elapsed
-/// time. Right: the step the app names while it works.
+/// time. Right: the step the app names while it works, or the waveform of the
+/// input level while recording.
 #[derive(Debug, PartialEq)]
 struct Parts {
     /// Style class of the pill.
     class: &'static str,
-    /// The pulsing dot and the elapsed time.
+    /// The pulsing dot, the elapsed time and the waveform.
     recording: bool,
     /// The spinner and, on the right, the step.
     working: bool,
@@ -140,8 +145,13 @@ pub struct Overlay {
     message: gtk::Label,
     spacer: gtk::Box,
     phase: gtk::Label,
+    waveform: gtk::DrawingArea,
+    /// The latest input level, from 0 to 1.
+    level: Rc<Cell<f64>>,
     /// Updates the elapsed time while recording.
     ticker: RefCell<Option<glib::SourceId>>,
+    /// Moves the waveform's bars on every frame while recording.
+    bars: RefCell<Option<gtk::TickCallbackId>>,
 }
 
 impl Overlay {
@@ -189,6 +199,13 @@ impl Overlay {
             .build();
         let spacer = gtk::Box::builder().hexpand(true).build();
         let phase = label("tw-phase");
+        // Decoration: the pill's name already says that it records.
+        let waveform = gtk::DrawingArea::builder()
+            .content_width(waveform::WIDTH as i32)
+            .content_height(waveform::MAX_HEIGHT as i32)
+            .valign(gtk::Align::Center)
+            .accessible_role(gtk::AccessibleRole::Presentation)
+            .build();
 
         // The role and the name tell screen readers what the pill shows, as the
         // extension's notification role does on GNOME.
@@ -209,6 +226,7 @@ impl Overlay {
             message.upcast_ref(),
             spacer.upcast_ref(),
             phase.upcast_ref(),
+            waveform.upcast_ref(),
         ] {
             pill.append(child);
         }
@@ -244,8 +262,16 @@ impl Overlay {
             message,
             spacer,
             phase,
+            waveform,
+            level: Rc::default(),
             ticker: RefCell::default(),
+            bars: RefCell::default(),
         })
+    }
+
+    /// The input level while recording, from 0 to 1.
+    pub fn set_level(&self, level: f32) {
+        self.level.set(f64::from(level));
     }
 
     /// Shows `state` with `text`, the same arguments as the bus signal;
@@ -274,13 +300,40 @@ impl Overlay {
         self.message.set_visible(parts.message);
         self.message.set_label(text);
         self.spacer.set_visible(!parts.message);
+        self.waveform.set_visible(parts.recording);
         // The compositor picks the screen when the window is shown. A visible
         // window stays where it is, so the indicator does not jump between
         // screens in the middle of a dictation.
         self.window.set_visible(true);
         if parts.recording {
             self.start_timer();
+            self.start_waveform();
         }
+    }
+
+    /// Draws the bars from a fresh model; the tick callback runs once per
+    /// frame while the pill is on screen.
+    fn start_waveform(&self) {
+        self.level.set(0.0);
+        let heights = Rc::new(Cell::new([0.0; waveform::BAR_COUNT]));
+        let drawn = Rc::clone(&heights);
+        self.waveform.set_draw_func(move |_, cr, _, height| {
+            draw_bars(cr, f64::from(height), &drawn.get());
+        });
+        let model = RefCell::new(BarModel::new());
+        let level = Rc::clone(&self.level);
+        let since = Instant::now();
+        let tick = self.waveform.add_tick_callback(move |area, clock| {
+            let now = clock.frame_time() as f64 / 1_000_000.0;
+            let level = level.get();
+            let bounce = since.elapsed().as_secs_f64() < waveform::BOUNCE_SECONDS
+                && level < waveform::BOUNCE_LEVEL;
+            let animate = area.settings().is_gtk_enable_animations();
+            heights.set(model.borrow_mut().advance(now, level, bounce, animate));
+            area.queue_draw();
+            glib::ControlFlow::Continue
+        });
+        self.bars.replace(Some(tick));
     }
 
     fn start_timer(&self) {
@@ -300,7 +353,26 @@ impl Overlay {
         if let Some(source) = self.ticker.take() {
             source.remove();
         }
+        if let Some(tick) = self.bars.take() {
+            tick.remove();
+        }
     }
+}
+
+/// Rounded white bars, centered vertically, as in the macOS app.
+fn draw_bars(cr: &cairo::Context, height: f64, heights: &[f64]) {
+    let radius = waveform::BAR_WIDTH / 2.0;
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.9);
+    for (index, bar) in heights.iter().enumerate() {
+        let bar_height = waveform::bar_height(*bar);
+        let x = index as f64 * (waveform::BAR_WIDTH + waveform::BAR_SPACING);
+        let y = (height - bar_height) / 2.0;
+        cr.new_sub_path();
+        cr.arc(x + radius, y + radius, radius, PI, 0.0);
+        cr.arc(x + radius, y + bar_height - radius, radius, 0.0, PI);
+        cr.close_path();
+    }
+    let _ = cr.fill();
 }
 
 #[cfg(test)]

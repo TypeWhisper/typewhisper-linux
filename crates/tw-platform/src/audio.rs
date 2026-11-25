@@ -2,7 +2,7 @@
 //! current desktop and which Flatpak allows with `--socket=pulseaudio`.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
 
 use libpulse_binding::def::BufferAttr;
@@ -14,9 +14,14 @@ use crate::i18n::{tr, tr_with};
 
 /// Sample rate of every buffer TypeWhisper hands to a transcription engine.
 pub const SAMPLE_RATE: u32 = 16_000;
-const CHUNK_SAMPLES: usize = SAMPLE_RATE as usize / 10; // 100 ms
-/// Chunks read after `Recorder::stop`, for audio that was still on its way.
-const TAIL_CHUNKS: usize = 2;
+/// One read, about 33 ms, so that the level updates 30 times a second as on macOS.
+const CHUNK_SAMPLES: usize = SAMPLE_RATE as usize / 30;
+/// Chunks read after `Recorder::stop`, for audio that was still on its way:
+/// about 200 ms.
+const TAIL_CHUNKS: usize = 6;
+/// The level meter's range, as in the macOS app: quieter is 0, louder is 1.
+const SILENT_DB: f32 = -55.0;
+const LOUD_DB: f32 = -18.0;
 
 fn connect() -> Result<Simple, String> {
     let spec = Spec {
@@ -73,10 +78,45 @@ pub fn record(seconds: f32) -> Result<Vec<f32>, String> {
     Ok(samples)
 }
 
+/// The level of the last chunk of `samples`, from 0 to 1.
+fn level_of(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let rms = (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt();
+    normalized_level(rms)
+}
+
+/// Maps an RMS value to 0..1 on a decibel scale, like the macOS app's meter.
+fn normalized_level(rms: f32) -> f32 {
+    if rms <= 0.0 {
+        return 0.0;
+    }
+    let decibels = 20.0 * rms.log10();
+    ((decibels - SILENT_DB) / (LOUD_DB - SILENT_DB)).clamp(0.0, 1.0)
+}
+
+/// The input level of a running recording, readable from any thread.
+#[derive(Clone, Default)]
+pub struct LevelMeter(Arc<AtomicU32>);
+
+impl LevelMeter {
+    /// The level of the latest chunk, from 0 (silence) to 1; 0 once the
+    /// recording has ended.
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.0.load(Ordering::Relaxed))
+    }
+
+    fn set(&self, level: f32) {
+        self.0.store(level.to_bits(), Ordering::Relaxed);
+    }
+}
+
 /// A running recording from the default source. PulseAudio resamples and mixes
 /// down, so the samples are already 16 kHz mono.
 pub struct Recorder {
     running: Arc<AtomicBool>,
+    meter: LevelMeter,
     thread: Option<JoinHandle<Result<Vec<f32>, String>>>,
 }
 
@@ -87,19 +127,27 @@ impl Recorder {
     pub fn start() -> Result<Self, String> {
         let running = Arc::new(AtomicBool::new(true));
         let flag = Arc::clone(&running);
+        let meter = LevelMeter::default();
+        let levels = meter.clone();
         let thread = std::thread::Builder::new()
             .name("tw-recorder".into())
             .spawn(move || {
-                let simple = connect()?;
-                let mut samples = Vec::new();
-                let mut bytes = vec![0u8; CHUNK_SAMPLES * 4];
-                while flag.load(Ordering::Acquire) {
-                    read_chunk(&simple, &mut bytes, &mut samples)?;
-                }
-                for _ in 0..TAIL_CHUNKS {
-                    read_chunk(&simple, &mut bytes, &mut samples)?;
-                }
-                Ok(samples)
+                let recorded = (|| {
+                    let simple = connect()?;
+                    let mut samples = Vec::new();
+                    let mut bytes = vec![0u8; CHUNK_SAMPLES * 4];
+                    while flag.load(Ordering::Acquire) {
+                        let start = samples.len();
+                        read_chunk(&simple, &mut bytes, &mut samples)?;
+                        levels.set(level_of(&samples[start..]));
+                    }
+                    for _ in 0..TAIL_CHUNKS {
+                        read_chunk(&simple, &mut bytes, &mut samples)?;
+                    }
+                    Ok(samples)
+                })();
+                levels.set(0.0);
+                recorded
             })
             .map_err(|e| {
                 tr_with(
@@ -109,12 +157,18 @@ impl Recorder {
             })?;
         Ok(Self {
             running,
+            meter,
             thread: Some(thread),
         })
     }
 
-    /// Stops after the current 100 ms chunk plus a short tail and returns
-    /// everything recorded.
+    /// The input level while the recording runs.
+    pub fn level_meter(&self) -> LevelMeter {
+        self.meter.clone()
+    }
+
+    /// Stops after the current chunk plus a short tail and returns everything
+    /// recorded.
     pub fn stop(mut self) -> Result<Vec<f32>, String> {
         self.running.store(false, Ordering::Release);
         self.thread
@@ -131,5 +185,29 @@ impl Drop for Recorder {
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn levels_follow_the_macos_meter() {
+        assert_eq!(normalized_level(0.0), 0.0);
+        // -60 dB is below the range, -18 dB its top, -36.5 dB its middle.
+        assert_eq!(normalized_level(0.001), 0.0);
+        assert!((normalized_level(10f32.powf(-18.0 / 20.0)) - 1.0).abs() < 1e-4);
+        assert!((normalized_level(10f32.powf(-36.5 / 20.0)) - 0.5).abs() < 1e-4);
+        assert_eq!(normalized_level(1.0), 1.0);
+    }
+
+    #[test]
+    fn level_is_the_rms_of_the_chunk() {
+        assert_eq!(level_of(&[]), 0.0);
+        let loud = vec![0.5f32; CHUNK_SAMPLES];
+        assert_eq!(level_of(&loud), 1.0);
+        let quiet = vec![0.0f32; CHUNK_SAMPLES];
+        assert_eq!(level_of(&quiet), 0.0);
     }
 }

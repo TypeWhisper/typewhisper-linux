@@ -2,7 +2,7 @@
 //
 // GNOME gives apps no always-on-top overlay and no way to learn the focused app.
 // This extension does both for the TypeWhisper app and nothing else:
-// - it draws the dictation indicator from the app's StateChanged signal;
+// - it draws the dictation indicator from the app's StateChanged and Level signals;
 // - it reports focus changes to the app with FocusChanged, only while the app runs.
 // It only talks to the current owner of com.typewhisper.TypeWhisper.
 
@@ -27,11 +27,69 @@ const EDGE_INSET = 20;
 const PULSE_MS = 1000;
 const STATES = ['recording', 'processing', 'inserting', 'error'];
 
+// The waveform of the input level, ported from the macOS app's
+// AudioWaveformBarModel, as the app's overlay for other desktops is.
+const BAR_COUNT = 5;
+const BAR_WIDTH = 3;
+const BAR_SPACING = 2;
+const MAX_HEIGHT = 16;
+const ATTACK = 0.04;
+const RELEASE = 0.16;
+const BOUNCE_INTERVAL = 0.06;
+const BOUNCE_HEIGHT = 0.85;
+// At the start, while the level stays this low, one bar bounces instead.
+const BOUNCE_SECONDS = 0.5;
+const BOUNCE_LEVEL = 0.05;
+const FRAME_MS = 16;
+
+// Bars near the center reach higher than the outer ones.
+function barShape(index) {
+    const position = (index + 0.5) / BAR_COUNT;
+    return 0.55 + 0.45 * Math.sin(Math.PI * position);
+}
+
+// A slow oscillation with a different rate per bar, in 0.6..1.
+function barDrift(index, now) {
+    const rate = 2.2 + 0.65 * index;
+    return 0.8 + 0.2 * Math.sin(now * rate + index * 2.1);
+}
+
+// Heights from 0 to 1 that follow the level with attack and release smoothing,
+// so that they do not jump between the 30 level updates a second.
+class BarModel {
+    constructor() {
+        this.heights = new Array(BAR_COUNT).fill(0);
+        this._lastTick = null;
+    }
+
+    advance(now, level, bounce, animate) {
+        const elapsed = this._lastTick === null
+            ? 1 / 60 : Math.min(0.1, Math.max(0.001, now - this._lastTick));
+        this._lastTick = now;
+        level = Math.min(1, Math.max(0, level));
+        const bouncingBar = Math.floor(now / BOUNCE_INTERVAL) % BAR_COUNT;
+        for (let index = 0; index < BAR_COUNT; index++) {
+            if (!animate) {
+                this.heights[index] = level * barShape(index);
+                continue;
+            }
+            const target = bounce
+                ? (index === bouncingBar ? BOUNCE_HEIGHT : 0)
+                : level * barShape(index) * barDrift(index, now);
+            const timeConstant = target > this.heights[index] ? ATTACK : RELEASE;
+            this.heights[index] += (target - this.heights[index]) * (1 - Math.exp(-elapsed / timeConstant));
+        }
+    }
+}
+
 export default class TypeWhisperExtension extends Extension {
     enable() {
         this._appOwner = null;
         this._timerId = 0;
+        this._frameId = 0;
         this._recordingSince = 0;
+        this._level = 0;
+        this._bars = new BarModel();
 
         // Left: what is happening (dot, spinner or icon) and, while recording,
         // the elapsed time. Right: the step the app names while it works.
@@ -53,8 +111,15 @@ export default class TypeWhisperExtension extends Extension {
         });
         this._spacer = new St.Widget({x_expand: true});
         this._phase = new St.Label({style_class: 'tw-phase', y_align: Clutter.ActorAlign.CENTER});
+        // Decoration: the pill's name already says that it records.
+        this._waveform = new St.DrawingArea({
+            style_class: 'tw-waveform',
+            y_align: Clutter.ActorAlign.CENTER,
+            accessible_role: Atk.Role.INVALID,
+        });
+        this._waveform.connect('repaint', area => this._drawBars(area));
         for (const child of [this._dot, this._spinner, this._icon, this._timer, this._message,
-            this._spacer, this._phase])
+            this._spacer, this._phase, this._waveform])
             this._indicator.add_child(child);
         // Top chrome stays above normal windows, like the shell's own OSDs.
         Main.layoutManager.addTopChrome(this._indicator);
@@ -80,12 +145,26 @@ export default class TypeWhisperExtension extends Extension {
                     this._setState(state, text);
             });
 
+        this._levelSub = Gio.DBus.session.signal_subscribe(APP_NAME, SHELL_IFACE, 'Level',
+            APP_PATH, null, Gio.DBusSignalFlags.NONE,
+            (_c, _sender, _path, _iface, _signal, params) => {
+                const [version, level] = params.deep_unpack();
+                if (version !== PROTOCOL_VERSION)
+                    return;
+                this._level = level;
+                // Without the frame timer, each update moves the bars; it also
+                // starts the timer when animations were switched back on.
+                if (!this._frameId && this._waveform.visible)
+                    this._tickBars();
+            });
+
         this._focusId = global.display.connect('notify::focus-window', () => this._reportFocus());
     }
 
     disable() {
         global.display.disconnect(this._focusId);
         Gio.DBus.session.signal_unsubscribe(this._stateSub);
+        Gio.DBus.session.signal_unsubscribe(this._levelSub);
         Gio.bus_unwatch_name(this._watchId);
         this._stopTimer();
         this._indicator.destroy();
@@ -97,6 +176,8 @@ export default class TypeWhisperExtension extends Extension {
         this._message = null;
         this._spacer = null;
         this._phase = null;
+        this._waveform = null;
+        this._bars = null;
         this._appOwner = null;
     }
 
@@ -126,6 +207,7 @@ export default class TypeWhisperExtension extends Extension {
         this._spacer.visible = state !== 'error';
         this._phase.visible = !recording && !feedback;
         this._phase.text = text;
+        this._waveform.visible = recording;
 
         this._indicator.show();
         const monitor = Main.layoutManager.primaryMonitor;
@@ -137,8 +219,10 @@ export default class TypeWhisperExtension extends Extension {
             area.y + area.height - natHeight - EDGE_INSET);
 
         // The pulse only runs on a mapped actor, so it starts after show().
-        if (recording)
+        if (recording) {
             this._startTimer();
+            this._startBars();
+        }
     }
 
     _startTimer() {
@@ -166,6 +250,62 @@ export default class TypeWhisperExtension extends Extension {
             GLib.source_remove(this._timerId);
             this._timerId = 0;
         }
+        if (this._frameId) {
+            GLib.source_remove(this._frameId);
+            this._frameId = 0;
+        }
+    }
+
+    _startBars() {
+        this._level = 0;
+        this._bars = new BarModel();
+        this._tickBars();
+    }
+
+    // Moves and redraws the bars. With animations on, a frame timer keeps them
+    // moving; it stops as soon as animations are switched off, and the bars
+    // then follow each level update directly.
+    _tickBars() {
+        const animate = St.Settings.get().enable_animations;
+        this._advanceBars(animate);
+        this._waveform.queue_repaint();
+        if (!animate || this._frameId)
+            return;
+        this._frameId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, FRAME_MS, () => {
+            const stillAnimated = St.Settings.get().enable_animations;
+            this._advanceBars(stillAnimated);
+            this._waveform.queue_repaint();
+            if (stillAnimated)
+                return GLib.SOURCE_CONTINUE;
+            this._frameId = 0;
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _advanceBars(animate) {
+        const now = GLib.get_monotonic_time() / 1000000;
+        const recordingFor = now - this._recordingSince / 1000000;
+        const bounce = recordingFor < BOUNCE_SECONDS && this._level < BOUNCE_LEVEL;
+        this._bars.advance(now, this._level, bounce, animate);
+    }
+
+    // Rounded white bars, centered vertically, as in the macOS app.
+    _drawBars(area) {
+        const cr = area.get_context();
+        const [, height] = area.get_surface_size();
+        const radius = BAR_WIDTH / 2;
+        cr.setSourceRGBA(1, 1, 1, 0.9);
+        this._bars.heights.forEach((bar, index) => {
+            const barHeight = BAR_WIDTH + (MAX_HEIGHT - BAR_WIDTH) * Math.min(1, Math.max(0, bar));
+            const x = index * (BAR_WIDTH + BAR_SPACING);
+            const y = (height - barHeight) / 2;
+            cr.newSubPath();
+            cr.arc(x + radius, y + radius, radius, Math.PI, 0);
+            cr.arc(x + radius, y + barHeight - radius, radius, 0, Math.PI);
+            cr.closePath();
+        });
+        cr.fill();
+        cr.$dispose();
     }
 
     _updateTimer() {

@@ -11,7 +11,7 @@ use futures_util::StreamExt;
 use gtk::{gio, glib};
 use serde_json::{Value, json};
 use tw_platform::accessibility::{Focus, FocusedField};
-use tw_platform::audio::{Recorder, SAMPLE_RATE};
+use tw_platform::audio::{LevelMeter, Recorder, SAMPLE_RATE};
 use tw_platform::i18n::{n_, tr, tr_with};
 use tw_platform::insert::{PasteKeys, TextInserter};
 use tw_platform::settings::{self, Settings};
@@ -37,6 +37,8 @@ const MODEL_SUMMARY: &str = n_("Runs offline with no API key.");
 /// How long the indicator keeps the result of a dictation on screen.
 const INSERTED_FEEDBACK: Duration = Duration::from_millis(900);
 const ERROR_FEEDBACK: Duration = Duration::from_secs(3);
+/// How often the indicator gets the input level while recording, as on macOS.
+const LEVEL_INTERVAL: Duration = Duration::from_millis(33);
 
 struct Ui {
     window: adw::ApplicationWindow,
@@ -635,6 +637,17 @@ impl App {
         }
     }
 
+    /// Sends the input level, from 0 to 1, to the indicator's waveform.
+    fn level(&self, level: f32) {
+        let state = self.state.borrow();
+        if let Some(bridge) = state.bridge.as_ref() {
+            bridge.set_level(level);
+        }
+        if let Some(overlay) = state.overlay.as_ref() {
+            overlay.set_level(level);
+        }
+    }
+
     /// Shows a result in the indicator and hides it after `duration`, unless
     /// another state has replaced it by then.
     fn indicator_feedback(self: &Rc<Self>, state: &str, text: &str, duration: Duration) {
@@ -1141,10 +1154,12 @@ fn start_recording(app: &Rc<App>) {
     }
     match Recorder::start() {
         Ok(recorder) => {
+            let meter = recorder.level_meter();
             state.recorder = Some(recorder);
             drop(state);
             app.set_phase(Phase::Recording);
             app.indicator("recording", &tr("Recording"));
+            report_levels(app, meter);
         }
         Err(error) => {
             state.interpreter.reset();
@@ -1152,6 +1167,21 @@ fn start_recording(app: &Rc<App>) {
             app.dictation_failed(&error);
         }
     }
+}
+
+/// Passes the input level to the indicator while the recording runs.
+fn report_levels(app: &Rc<App>, meter: LevelMeter) {
+    let app = Rc::downgrade(app);
+    glib::timeout_add_local(LEVEL_INTERVAL, move || {
+        let Some(app) = app.upgrade() else {
+            return glib::ControlFlow::Break;
+        };
+        if app.state.borrow().phase != Phase::Recording {
+            return glib::ControlFlow::Break;
+        }
+        app.level(meter.level());
+        glib::ControlFlow::Continue
+    });
 }
 
 fn stop_recording(app: Rc<App>) {

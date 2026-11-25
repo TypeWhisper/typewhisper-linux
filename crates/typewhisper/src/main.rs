@@ -4,6 +4,7 @@ mod kwin_script;
 mod overlay;
 mod shell_bridge;
 mod terminals;
+mod waveform;
 
 use adw::prelude::*;
 
