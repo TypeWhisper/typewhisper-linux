@@ -57,12 +57,15 @@ JS_VIEW_CODE = re.compile(
     r"addTopChrome|addChrome|set_position|set_size|ease|show|hide)\s*\("
     r"|\.(?:text|opacity|visible|icon_name|gicon)\s*="
 )
+# A line that holds nothing but a string: the wrapped argument of a call such as
+# `row.set_subtitle(` on the line above, which the diff does not show.
+STRING_ARGUMENT = re.compile(r"""^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*[,)]*;?$""")
 
 # Widgets are built in the app crate and in the GNOME Shell extension; the other crates and
 # the plugins have no interface.
 VIEW_CODE = (
-    ("crates/typewhisper/", ".rs", RUST_VIEW_CODE),
-    ("gnome-shell-extension/", ".js", JS_VIEW_CODE),
+    ("crates/typewhisper/", ".rs", (RUST_VIEW_CODE, STRING_ARGUMENT)),
+    ("gnome-shell-extension/", ".js", (JS_VIEW_CODE, STRING_ARGUMENT)),
 )
 
 
@@ -123,7 +126,8 @@ def ui_files(paths, lines_by_file):
     for path in paths:
         if not path.startswith(SHIPPED) or NOT_SHIPPED.search(path):
             continue
-        patterns = [pattern for folder, suffix, pattern in VIEW_CODE if path.startswith(folder) and path.endswith(suffix)]
+        patterns = [pattern for folder, suffix, group in VIEW_CODE
+                    if path.startswith(folder) and path.endswith(suffix) for pattern in group]
         if UI_RESOURCES.search(path) or any(p.search(line) for p in patterns for line in lines_by_file.get(path, ())):
             found.append(path)
     return found

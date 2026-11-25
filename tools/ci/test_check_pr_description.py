@@ -106,6 +106,15 @@ class UIFileTests(unittest.TestCase):
         self.assertEqual(lines["crates/typewhisper/src/old_badge.rs"],
                          ["fn badge() -> gtk::Label {", "--counter", "}"])
 
+    def test_wrapped_string_argument_is_visible(self):
+        # rustfmt puts a long text on its own line; the diff then holds only the string.
+        app = "crates/typewhisper/src/app.rs"
+        self.assertEqual(ui_files([app], {app: ['"Hold the key and speak",']}), [app])
+        self.assertEqual(ui_files([app], {app: ['"Listening");']}), [app])
+        self.assertEqual(ui_files([app], {app: ['let name = "com.typewhisper.TypeWhisper";']}), [])
+        platform = "crates/tw-platform/src/insert.rs"
+        self.assertEqual(ui_files([platform], {platform: ['"Hold the key and speak",']}), [])
+
     def test_extension_code_without_widgets_is_not_visible(self):
         path = "gnome-shell-extension/typewhisper@typewhisper.com/extension.js"
         self.assertEqual(ui_files([path], {path: ["this._focus = global.display.focus_window;"]}), [])

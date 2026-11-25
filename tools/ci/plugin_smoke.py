@@ -12,8 +12,11 @@ import os
 import struct
 import subprocess
 import sys
+import threading
 
 KIND_JSON = 1
+# A plugin that starts but never answers must not hold the job until its timeout.
+DEADLINE_SECONDS = 60
 
 
 def call(process, request_id, method, params):
@@ -22,7 +25,8 @@ def call(process, request_id, method, params):
     process.stdin.flush()
     header = process.stdout.read(4)
     if len(header) < 4:
-        sys.exit(f"{method}: the plugin closed its output (exit code {process.poll()})")
+        sys.exit(f"{method}: no reply; the plugin closed its output or did not answer within "
+                 f"{DEADLINE_SECONDS} seconds")
     body = process.stdout.read(struct.unpack(">I", header)[0])
     message = json.loads(body[1:])
     if message.get("id") != request_id or "error" in message:
@@ -36,12 +40,20 @@ def main():
         manifest = json.load(file)
     process = subprocess.Popen([os.path.join(folder, manifest["executable"])],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    result = call(process, 1, "initialize",
-                  {"protocolVersion": manifest["protocolVersion"], "hostVersion": manifest["minHostVersion"]})
-    if result.get("pluginId") != manifest["id"]:
-        sys.exit(f"initialize: expected plugin {manifest['id']}, got {result}")
-    call(process, 2, "shutdown", {})
-    code = process.wait(timeout=10)
+    # Killing the plugin ends a read that waits for its reply.
+    watchdog = threading.Timer(DEADLINE_SECONDS, process.kill)
+    watchdog.start()
+    try:
+        result = call(process, 1, "initialize",
+                      {"protocolVersion": manifest["protocolVersion"], "hostVersion": manifest["minHostVersion"]})
+        if result.get("pluginId") != manifest["id"]:
+            sys.exit(f"initialize: expected plugin {manifest['id']}, got {result}")
+        call(process, 2, "shutdown", {})
+        code = process.wait()
+    finally:
+        watchdog.cancel()
+        process.kill()
+        process.wait()
     if code != 0:
         sys.exit(f"the plugin exited with code {code}")
     print(f"{manifest['id']} {manifest['version']} answers initialize and shuts down")
