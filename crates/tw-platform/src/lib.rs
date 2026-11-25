@@ -3,6 +3,7 @@
 //! Everything that needs the desktop's permission goes through the XDG desktop
 //! portals, so the same code works on GNOME and KDE Plasma and inside Flatpak.
 
+pub mod accessibility;
 pub mod audio;
 pub mod data_control;
 pub mod insert;

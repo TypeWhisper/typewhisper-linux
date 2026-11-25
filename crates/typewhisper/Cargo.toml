@@ -15,3 +15,5 @@ tw-platform.workspace = true
 tw-plugin-host.workspace = true
 async-channel = "2"
 futures-util = "0.3"
+regex = "1"
+unicode-segmentation = "1"

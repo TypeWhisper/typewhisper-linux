@@ -10,6 +10,11 @@ use serde_json::{Map, Value};
 
 /// Restore the clipboard after inserting text. Off by default, as on macOS.
 pub const PRESERVE_CLIPBOARD: &str = "preserveClipboard";
+/// Fit dictations to the text around the cursor. On by default, as on macOS.
+pub const APP_FORMATTING: &str = "appFormattingEnabled";
+/// Drop a model-added period after a value dictated into an empty field. On by
+/// default, as on macOS.
+pub const STRIP_STANDALONE_VALUE_PERIOD: &str = "stripFinalPeriodFromStandaloneValuesEnabled";
 
 pub struct Settings {
     path: PathBuf,
