@@ -47,6 +47,10 @@ class PlaceholderTest(unittest.TestCase):
     def test_missing_placeholder(self):
         self.assertEqual(update.placeholder_problems("Press {key} to begin.", "Drücke, um loszulegen."), ["missing {key}"])
 
+    def test_keyword_list_keeps_its_final_semicolon(self):
+        self.assertEqual(update.placeholder_problems("a;b;", "x;y;"), [])
+        self.assertEqual(update.placeholder_problems("a;b;", "x;y"), ["keyword list without the final ;"])
+
     def test_renamed_placeholder(self):
         self.assertEqual(
             update.placeholder_problems("Add “{app_id}”", "„{app}“ hinzufügen"),

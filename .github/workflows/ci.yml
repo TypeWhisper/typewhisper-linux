@@ -78,11 +78,14 @@ jobs:
             python3 -m json.tool "$file" > /dev/null || { echo "::error file=$file::Invalid JSON"; exit 1; }
           done
 
+      - name: Translate the desktop file and the AppStream metadata
+        run: tools/i18n/translate-packaging.sh "$RUNNER_TEMP/packaging"
+
       - name: Validate the desktop file
-        run: desktop-file-validate packaging/*.desktop
+        run: desktop-file-validate "$RUNNER_TEMP"/packaging/*.desktop
 
       - name: Validate the AppStream metadata
-        run: appstreamcli validate --no-net packaging/*.metainfo.xml packaging/flatpak/*.metainfo.xml
+        run: appstreamcli validate --no-net "$RUNNER_TEMP"/packaging/*.metainfo.xml
 
   rust:
     name: Rust (${{ matrix.arch }})

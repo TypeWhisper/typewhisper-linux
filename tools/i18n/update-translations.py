@@ -3,9 +3,11 @@
 
 As in the macOS app's string catalog, the English text is the message ID. The
 script collects every text passed to tr(), tr_with() and n_() in crates/*/src,
-writes them to po/typewhisper.pot and to every po/<language>.po listed in
-po/LINGUAS. Translations already in a catalog are kept, texts no longer used
-are dropped.
+and with xgettext the translatable texts of the desktop file and AppStream
+templates in packaging/, writes them to po/typewhisper.pot and to every
+po/<language>.po listed in po/LINGUAS. Translations already in a catalog are
+kept, texts no longer used are dropped. xgettext needs the AppStream ITS rules,
+which Linux distributions install with AppStream.
 
 With the path to the macOS app's Localizable.xcstrings, it also fills empty
 translations from the Mac's when the English texts match and neither side has
@@ -20,6 +22,7 @@ is missing.
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -32,6 +35,12 @@ CALL = re.compile(r'\b(?:tr|tr_with|n_)\(\s*"')
 ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "0": "\0", "\\": "\\", '"': '"', "'": "'"}
 MAC_SPECIFIER = re.compile(r"%")
 LINUX_PLACEHOLDER = re.compile(r"\{[a-z_]+\}")
+# Templates that tools/i18n/translate-packaging.sh fills with the translations.
+PACKAGING = [
+    "packaging/com.typewhisper.TypeWhisper.desktop.in",
+    "packaging/com.typewhisper.TypeWhisper.metainfo.xml.in",
+    "packaging/flatpak/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml.in",
+]
 
 
 def rust_string(source, start):
@@ -74,6 +83,32 @@ def source_texts():
             files = texts.setdefault(text, [])
             if relative not in files:
                 files.append(relative)
+    return texts
+
+
+def packaging_texts():
+    """Returns {text: [files]} for the packaging templates, as xgettext reads them.
+
+    msgfmt looks the texts up exactly as xgettext extracts them, with the
+    whitespace of the XML paragraphs folded, so the script takes xgettext's word.
+    """
+    result = subprocess.run(
+        ["xgettext", "--from-code=UTF-8", "--omit-header", "--no-wrap", "-o", "-", *PACKAGING],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        sys.exit(f"xgettext failed:\n{result.stderr}")
+    texts = {}
+    files = []
+    for line in result.stdout.splitlines():
+        if line.startswith("#:"):
+            files += [reference.rsplit(":", 1)[0] for reference in line[2:].split()]
+        elif line.startswith("msgid "):
+            text = po_string(line[6:])
+            if text:
+                entry = texts.setdefault(text, [])
+                entry += [file for file in dict.fromkeys(files) if file not in entry]
+            files = []
     return texts
 
 
@@ -179,6 +214,9 @@ def placeholder_problems(text, translation):
     problems += [f"unknown {name}" for name in found if name not in expected]
     if not problems and expected != found:
         problems.append("placeholders repeated")
+    # The desktop file's keywords are a list that ends with a semicolon.
+    if text.endswith(";") and not translation.endswith(";"):
+        problems.append("keyword list without the final ;")
     return problems
 
 
@@ -189,6 +227,9 @@ def main():
     arguments = parser.parse_args()
 
     texts = source_texts()
+    for text, files in packaging_texts().items():
+        entry = texts.setdefault(text, [])
+        entry += [file for file in files if file not in entry]
     languages = (PO_DIR / "LINGUAS").read_text(encoding="utf-8").split()
     stale = []
     missing = 0

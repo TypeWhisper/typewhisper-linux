@@ -352,3 +352,27 @@ msgstr "完成"
 #: crates/typewhisper/src/terminals.rs
 msgid "Select Apps"
 msgstr "选择应用"
+
+#: packaging/com.typewhisper.TypeWhisper.desktop.in
+msgid "TypeWhisper"
+msgstr "TypeWhisper"
+
+#: packaging/com.typewhisper.TypeWhisper.desktop.in packaging/com.typewhisper.TypeWhisper.metainfo.xml.in
+msgid "Dictate into any app and transform text with workflows"
+msgstr "在任意应用中听写，并用工作流转换文本"
+
+#: packaging/com.typewhisper.TypeWhisper.desktop.in
+msgid "dictation;speech;transcription;voice;"
+msgstr "听写;语音转文字;转录;语音识别;"
+
+#: packaging/com.typewhisper.TypeWhisper.metainfo.xml.in
+msgid "TypeWhisper turns speech into text in any app, with local or cloud speech models, and transforms the result with reusable workflows."
+msgstr "TypeWhisper 可在任意应用中将语音转换为文本，支持本地或云端语音模型，并通过可复用的工作流处理结果。"
+
+#: packaging/com.typewhisper.TypeWhisper.metainfo.xml.in
+msgid "This is an early development version."
+msgstr "这是早期开发版本。"
+
+#: packaging/flatpak/com.typewhisper.TypeWhisper.Plugin.Parakeet.metainfo.xml.in
+msgid "Local speech recognition for 25 European languages"
+msgstr "支持 25 种欧洲语言的本地语音识别"

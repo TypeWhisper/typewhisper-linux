@@ -46,8 +46,11 @@ tools/i18n/update-translations.py path/to/typewhisper-mac/TypeWhisper/Resources/
 
 It adds the new texts to every catalog, takes the macOS app's translation where
 the English text is the same, and lists the texts that still need one. CI fails
-while a translation is missing. `tools/dev/install-dev.sh` and the Flatpak build
-compile the catalogs with `msgfmt`.
+while a translation is missing. The desktop file and the AppStream metadata are
+templates in `packaging/` (`*.in`); the script reads their texts with `xgettext`,
+which needs the AppStream ITS rules that Linux distributions install with
+AppStream. `tools/dev/install-dev.sh` and the Flatpak build compile the catalogs
+and write the translated desktop file and metadata with `msgfmt`.
 
 ## Plugins
 

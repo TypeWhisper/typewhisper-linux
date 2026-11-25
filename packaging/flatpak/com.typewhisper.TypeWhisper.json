@@ -58,10 +58,11 @@
         "cargo build --release --locked --offline -p typewhisper",
         "install -Dm755 target/release/typewhisper /app/bin/typewhisper",
         "tools/i18n/build-catalogs.sh /app/share/locale",
+        "tools/i18n/translate-packaging.sh translated",
         "install -d /app/plugins",
-        "install -Dm644 packaging/com.typewhisper.TypeWhisper.desktop /app/share/applications/com.typewhisper.TypeWhisper.desktop",
+        "install -Dm644 translated/com.typewhisper.TypeWhisper.desktop /app/share/applications/com.typewhisper.TypeWhisper.desktop",
         "install -Dm644 packaging/com.typewhisper.TypeWhisper.svg /app/share/icons/hicolor/scalable/apps/com.typewhisper.TypeWhisper.svg",
-        "install -Dm644 packaging/com.typewhisper.TypeWhisper.metainfo.xml /app/share/metainfo/com.typewhisper.TypeWhisper.metainfo.xml"
+        "install -Dm644 translated/com.typewhisper.TypeWhisper.metainfo.xml /app/share/metainfo/com.typewhisper.TypeWhisper.metainfo.xml"
       ],
       "sources": [
         { "type": "dir", "path": "../..", "skip": ["target", ".flatpak-builder", "build-dir", "repo", ".git"] },

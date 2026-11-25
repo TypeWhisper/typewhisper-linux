@@ -18,6 +18,7 @@ target="$target_dir/release"
 cargo build --release --locked --target-dir "$target_dir" \
   -p typewhisper -p tw-plugin-parakeet --manifest-path "$repo/Cargo.toml"
 "$repo/tools/i18n/build-catalogs.sh" "$target_dir/share/locale"
+"$repo/tools/i18n/translate-packaging.sh" "$target_dir/packaging"
 
 # Quotes a path as one argument of an Exec key: the quoting rule escapes
 # " ` $ and \, the string rule then doubles every backslash, and % becomes %%.
@@ -44,7 +45,7 @@ while IFS= read -r line; do
   else
     printf '%s\n' "$line"
   fi
-done < "$repo/packaging/com.typewhisper.TypeWhisper.desktop" > "$apps/com.typewhisper.TypeWhisper.desktop"
+done < "$target_dir/packaging/com.typewhisper.TypeWhisper.desktop" > "$apps/com.typewhisper.TypeWhisper.desktop"
 install -Dm644 "$repo/packaging/com.typewhisper.TypeWhisper.svg" \
   "$data/icons/hicolor/scalable/apps/com.typewhisper.TypeWhisper.svg"
 
