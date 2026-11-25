@@ -1,27 +1,56 @@
+/* A dark pill at the bottom of the screen, the same in the light and dark style. */
 .tw-indicator {
-  background-color: rgba(28, 28, 30, 0.94);
-  border-radius: 999px;
-  padding: 10px 20px;
+  background-color: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 24px;
+  min-width: 238px;
+  min-height: 46px;
+  padding: 0 20px;
   spacing: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 5px 10px rgba(0, 0, 0, 0.3);
+  color: #ffffff;
+}
+
+.tw-indicator.tw-state-error {
+  min-width: 298px;
+  border-color: rgba(255, 69, 58, 0.55);
 }
 
 .tw-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 6px;
-  background-color: #9a9996;
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background-color: #ff453a;
+  box-shadow: 0 0 6px rgba(255, 214, 10, 0.8);
 }
 
-.tw-dot.tw-recording {
-  background-color: #e01b24;
+.tw-icon {
+  icon-size: 16px;
 }
 
-.tw-dot.tw-processing {
-  background-color: #f6d32d;
+.tw-icon.tw-inserting {
+  color: #32d74b;
 }
 
-.tw-label {
-  color: #ffffff;
-  font-weight: bold;
+.tw-icon.tw-error {
+  color: #ff453a;
+}
+
+.tw-timer {
+  font-size: 13px;
+  font-weight: 500;
+  font-feature-settings: "tnum";
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.tw-message {
+  max-width: 420px;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.tw-phase {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.7);
 }
