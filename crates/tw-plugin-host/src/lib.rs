@@ -15,6 +15,9 @@ use std::cmp::Ordering;
 use std::io::{self, BufReader, BufWriter};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tw_plugin_protocol::{Frame, Manifest, PROTOCOL_VERSION, read_frame, write_frame};
@@ -155,6 +158,9 @@ pub enum PluginError {
     },
     /// The plugin closed its output or sent something that is not a response.
     Protocol(String),
+    /// The plugin did not answer in time, so the host stopped it. Names the
+    /// request, or `transcription` for [`PluginProcess::transcribe`].
+    TimedOut(String),
 }
 
 impl std::fmt::Display for PluginError {
@@ -163,6 +169,7 @@ impl std::fmt::Display for PluginError {
             PluginError::Io(e) => write!(f, "plugin process: {e}"),
             PluginError::Plugin { message, .. } => write!(f, "{message}"),
             PluginError::Protocol(m) => write!(f, "plugin protocol: {m}"),
+            PluginError::TimedOut(m) => write!(f, "plugin timed out during {m} and was stopped"),
         }
     }
 }
@@ -173,12 +180,83 @@ impl From<io::Error> for PluginError {
     }
 }
 
+/// How long a plugin may take before the host stops it. A plugin that hangs
+/// would otherwise keep its output open and block the caller for good.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    /// `initialize`, `transcription.begin` and any request not listed below.
+    quick: Duration,
+    /// `transcription.loadModel`.
+    load_model: Duration,
+    /// The longest silence during `models.download`; every notification restarts it.
+    download_silence: Duration,
+    /// A whole transcription may take this plus `transcribe_per_audio` times the
+    /// length of its audio.
+    transcribe_base: Duration,
+    transcribe_per_audio: u32,
+}
+
+impl Limits {
+    const DEFAULT: Limits = Limits {
+        // Parakeet's `initialize` only checks which model files exist; 30 s leaves room
+        // for starting the process from a cold disk on a busy machine.
+        quick: Duration::from_secs(30),
+        // Parakeet loads its 670 MB model in 1 to 2 s; two minutes also covers a slow
+        // disk and a slow CPU.
+        load_model: Duration::from_secs(120),
+        // Parakeet reports every 1 % (about 5 MB) and stays silent while it unpacks, so
+        // ten minutes are enough for a line of about 8 KB/s and a slow unpack.
+        download_silence: Duration::from_secs(600),
+        // Parakeet decodes 20 to 30 times faster than real time; real time plus 30 s
+        // also covers a CPU many times slower and a cold first call.
+        transcribe_base: Duration::from_secs(30),
+        transcribe_per_audio: 1,
+    };
+
+    fn of(&self, method: &str) -> Limit {
+        match method {
+            "transcription.loadModel" => Limit::Total(self.load_model),
+            "models.download" => Limit::Silence(self.download_silence),
+            _ => Limit::Total(self.quick),
+        }
+    }
+
+    /// The time for `transcription.begin`, the audio and `transcription.end` together.
+    fn transcription(&self, samples: usize) -> Duration {
+        let audio = Duration::from_millis(samples as u64 * 1000 / SAMPLE_RATE);
+        self.transcribe_base + audio * self.transcribe_per_audio
+    }
+}
+
+/// Sample rate of the PCM frames the protocol carries.
+const SAMPLE_RATE: u64 = 16_000;
+
+/// How long the plugin has before the host gives up on it.
+#[derive(Debug, Clone, Copy)]
+enum Limit {
+    /// Until the response, however many notifications arrive.
+    Total(Duration),
+    /// Without any message from the plugin, so a long download stays alive while
+    /// it reports progress.
+    Silence(Duration),
+}
+
+impl Limit {
+    fn duration(self) -> Duration {
+        match self {
+            Limit::Total(d) | Limit::Silence(d) => d,
+        }
+    }
+}
+
 /// A running plugin. Calls block, so use it from a worker thread.
 pub struct PluginProcess {
-    child: Child,
+    child: Arc<Mutex<Child>>,
     input: BufWriter<ChildStdin>,
     output: BufReader<ChildStdout>,
     next_id: u64,
+    limits: Limits,
+    watchdog: Watchdog,
 }
 
 impl PluginProcess {
@@ -188,6 +266,15 @@ impl PluginProcess {
         plugin: &InstalledPlugin,
         data_dir: &Path,
         host_version: &str,
+    ) -> Result<(Self, Value), PluginError> {
+        Self::start_with(plugin, data_dir, host_version, Limits::DEFAULT)
+    }
+
+    fn start_with(
+        plugin: &InstalledPlugin,
+        data_dir: &Path,
+        host_version: &str,
+        limits: Limits,
     ) -> Result<(Self, Value), PluginError> {
         std::fs::create_dir_all(data_dir)?;
         // A relative program path would be resolved after the change of directory.
@@ -200,11 +287,15 @@ impl PluginProcess {
             .spawn()?;
         let input = BufWriter::new(child.stdin.take().expect("piped stdin"));
         let output = BufReader::new(child.stdout.take().expect("piped stdout"));
+        let child = Arc::new(Mutex::new(child));
+        let watchdog = Watchdog::start(Arc::clone(&child))?;
         let mut process = Self {
             child,
             input,
             output,
             next_id: 0,
+            limits,
+            watchdog,
         };
         let info = process.call(
             "initialize",
@@ -216,10 +307,69 @@ impl PluginProcess {
 
     /// Sends a request and waits for its response. Notifications that arrive in
     /// between (for example download progress) go to `on_notification`.
+    ///
+    /// A plugin that does not answer in time is stopped, and the call returns
+    /// [`PluginError::TimedOut`]. The process cannot be used after that.
     pub fn call(
         &mut self,
         method: &str,
         params: Value,
+        on_notification: &mut dyn FnMut(&str, &Value),
+    ) -> Result<Value, PluginError> {
+        let limit = self.limits.of(method);
+        self.within(method, limit, |process| {
+            process.request(method, params, limit, on_notification)
+        })
+    }
+
+    /// Transcribes 16 kHz mono audio with the loaded model.
+    pub fn transcribe(
+        &mut self,
+        samples: &[f32],
+        language: Option<&str>,
+    ) -> Result<Value, PluginError> {
+        let limit = Limit::Total(self.limits.transcription(samples.len()));
+        self.within("transcription", limit, |process| {
+            process.request(
+                "transcription.begin",
+                json!({"requestId": "dictation", "language": language}),
+                limit,
+                &mut |_, _| {},
+            )?;
+            for chunk in samples.chunks(1600) {
+                write_frame(&mut process.input, &Frame::Pcm(chunk.to_vec()))?;
+            }
+            process.request(
+                "transcription.end",
+                json!({"requestId": "dictation"}),
+                limit,
+                &mut |_, _| {},
+            )
+        })
+    }
+
+    /// Runs `work` under the watchdog. If the limit runs out, the watchdog kills
+    /// the plugin, which ends any read or write that `work` is blocked in.
+    fn within<T>(
+        &mut self,
+        what: &str,
+        limit: Limit,
+        work: impl FnOnce(&mut Self) -> Result<T, PluginError>,
+    ) -> Result<T, PluginError> {
+        self.watchdog.arm(limit.duration());
+        let result = work(self);
+        self.watchdog.disarm();
+        if self.watchdog.fired() {
+            return Err(PluginError::TimedOut(what.to_owned()));
+        }
+        result
+    }
+
+    fn request(
+        &mut self,
+        method: &str,
+        params: Value,
+        limit: Limit,
         on_notification: &mut dyn FnMut(&str, &Value),
     ) -> Result<Value, PluginError> {
         self.next_id += 1;
@@ -252,51 +402,133 @@ impl PluginProcess {
                         return Ok(message.get("result").cloned().unwrap_or(Value::Null));
                     }
                     if let Some(name) = message.get("method").and_then(Value::as_str) {
+                        if let Limit::Silence(silence) = limit {
+                            self.watchdog.arm(silence);
+                        }
                         on_notification(name, message.get("params").unwrap_or(&Value::Null));
                     }
                 }
             }
         }
     }
-
-    /// Transcribes 16 kHz mono audio with the loaded model.
-    pub fn transcribe(
-        &mut self,
-        samples: &[f32],
-        language: Option<&str>,
-    ) -> Result<Value, PluginError> {
-        self.call(
-            "transcription.begin",
-            json!({"requestId": "dictation", "language": language}),
-            &mut |_, _| {},
-        )?;
-        for chunk in samples.chunks(1600) {
-            write_frame(&mut self.input, &Frame::Pcm(chunk.to_vec()))?;
-        }
-        self.call(
-            "transcription.end",
-            json!({"requestId": "dictation"}),
-            &mut |_, _| {},
-        )
-    }
 }
+
+/// How long the plugin gets to exit after `shutdown`.
+const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
 
 impl Drop for PluginProcess {
     fn drop(&mut self) {
+        // A plugin that no longer reads its input would block this write; the
+        // watchdog ends it.
+        self.watchdog.arm(SHUTDOWN_GRACE);
         let _ = write_frame(
             &mut self.input,
             &Frame::Json(json!({"jsonrpc": "2.0", "id": 0, "method": "shutdown"})),
         );
         // Give the plugin a moment to exit on its own, then make sure it is gone.
+        let mut child = lock(&self.child);
         for _ in 0..20 {
-            if matches!(self.child.try_wait(), Ok(Some(_))) {
+            if matches!(child.try_wait(), Ok(Some(_))) {
                 return;
             }
-            std::thread::sleep(std::time::Duration::from_millis(25));
+            std::thread::sleep(SHUTDOWN_GRACE / 20);
         }
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let _ = child.kill();
+        let _ = child.wait();
     }
+}
+
+/// One thread per plugin process that kills the plugin when a deadline passes.
+/// Calls move the deadline; the thread sleeps until it is due.
+struct Watchdog {
+    shared: Arc<Shared>,
+    thread: Option<JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct Shared {
+    state: Mutex<WatchState>,
+    changed: Condvar,
+}
+
+#[derive(Default)]
+struct WatchState {
+    deadline: Option<Instant>,
+    /// The watchdog killed the plugin. It stays set, as the process is gone.
+    fired: bool,
+    stop: bool,
+}
+
+impl Watchdog {
+    fn start(child: Arc<Mutex<Child>>) -> io::Result<Self> {
+        let shared = Arc::new(Shared::default());
+        let thread = std::thread::Builder::new()
+            .name("plugin-watchdog".into())
+            .spawn({
+                let shared = Arc::clone(&shared);
+                move || watch(&shared, &child)
+            })?;
+        Ok(Self {
+            shared,
+            thread: Some(thread),
+        })
+    }
+
+    /// Kills the plugin unless `disarm` or another `arm` comes within `limit`.
+    fn arm(&self, limit: Duration) {
+        lock(&self.shared.state).deadline = Some(Instant::now() + limit);
+        self.shared.changed.notify_one();
+    }
+
+    fn disarm(&self) {
+        lock(&self.shared.state).deadline = None;
+    }
+
+    fn fired(&self) -> bool {
+        lock(&self.shared.state).fired
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        lock(&self.shared.state).stop = true;
+        self.shared.changed.notify_one();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+fn watch(shared: &Shared, child: &Mutex<Child>) {
+    let mut state = lock(&shared.state);
+    while !state.stop {
+        let Some(deadline) = state.deadline else {
+            state = shared
+                .changed
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+            continue;
+        };
+        let now = Instant::now();
+        if now < deadline {
+            state = shared
+                .changed
+                .wait_timeout(state, deadline - now)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+            continue;
+        }
+        state.deadline = None;
+        state.fired = true;
+        drop(state);
+        // The pipes close with the process, so the blocked read or write returns.
+        let _ = lock(child).kill();
+        state = lock(&shared.state);
+    }
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 #[cfg(test)]
@@ -372,5 +604,178 @@ mod tests {
     fn compares_versions_numerically() {
         assert_eq!(compare_versions("1.10.0", "1.9.9"), Ordering::Greater);
         assert_eq!(compare_versions("1.2", "1.2.0"), Ordering::Equal);
+    }
+
+    /// Short limits for the fake plugins. `quick` still leaves them time to start
+    /// on a busy machine.
+    const FAST: Limits = Limits {
+        quick: Duration::from_secs(2),
+        load_model: Duration::from_millis(300),
+        download_silence: Duration::from_secs(1),
+        transcribe_base: Duration::from_millis(300),
+        transcribe_per_audio: 0,
+    };
+
+    /// Longer than any test waits, so a plugin still sleeping proves that the
+    /// watchdog ended it.
+    const HANG: &str = "exec sleep 30";
+
+    fn frame(message: Value) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        write_frame(&mut bytes, &Frame::Json(message)).unwrap();
+        bytes
+    }
+
+    fn response(id: u64, result: Value) -> Vec<u8> {
+        frame(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+    }
+
+    /// A plugin made of a shell script. It runs in its own folder, where it can
+    /// `cat` the given frames to answer requests.
+    fn fake_plugin(root: &Path, script: &str, frames: &[(&str, Vec<u8>)]) -> InstalledPlugin {
+        use std::os::unix::fs::PermissionsExt;
+        write_plugin(root, "fake", "1.0.0", "plugin");
+        let dir = root.join("fake");
+        for (name, bytes) in frames {
+            std::fs::write(dir.join(name), bytes).unwrap();
+        }
+        let executable = dir.join("plugin");
+        std::fs::write(&executable, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        discover(&[(root.to_path_buf(), false)]).remove(0)
+    }
+
+    /// Starts a fake plugin. While one test writes its script, another may be
+    /// starting a process that briefly inherits the open file, and exec then
+    /// fails with "Text file busy". Trying again a moment later works.
+    fn start_fake(
+        plugin: &InstalledPlugin,
+        root: &Path,
+        limits: Limits,
+    ) -> Result<(PluginProcess, Value), PluginError> {
+        for _ in 0..50 {
+            match PluginProcess::start_with(plugin, &root.join("data"), "0.1.0", limits) {
+                Err(PluginError::Io(e)) if e.kind() == io::ErrorKind::ExecutableFileBusy => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                started => return started,
+            }
+        }
+        panic!("the fake plugin stayed busy");
+    }
+
+    fn killed(process: &PluginProcess) -> bool {
+        use std::os::unix::process::ExitStatusExt;
+        lock(&process.child).wait().unwrap().signal() == Some(9)
+    }
+
+    #[test]
+    fn leaves_an_answering_plugin_alone() {
+        let root = temp_root("answering");
+        let plugin = fake_plugin(
+            &root,
+            // The download takes longer than its silence limit but reports progress
+            // in between.
+            "cat initialize.frame\n\
+             for i in 1 2 3 4 5 6; do sleep 0.3; cat progress.frame; done\n\
+             cat download.frame begin.frame end.frame\n\
+             exec cat > /dev/null",
+            &[
+                ("initialize.frame", response(1, json!({"models": []}))),
+                (
+                    "progress.frame",
+                    frame(json!({"jsonrpc": "2.0", "method": "models.progress"})),
+                ),
+                ("download.frame", response(2, json!({"installed": true}))),
+                ("begin.frame", response(3, json!({}))),
+                ("end.frame", response(4, json!({"text": "hello"}))),
+            ],
+        );
+        let (mut process, _) = start_fake(&plugin, &root, FAST).unwrap();
+
+        let mut progress = 0;
+        let started = Instant::now();
+        let downloaded = process.call("models.download", json!({}), &mut |method, _| {
+            assert_eq!(method, "models.progress");
+            progress += 1;
+        });
+        assert_eq!(downloaded.unwrap(), json!({"installed": true}));
+        assert_eq!(progress, 6);
+        assert!(started.elapsed() > FAST.download_silence);
+
+        let transcribed = process.transcribe(&[0.0; 16_000], None).unwrap();
+        assert_eq!(transcribed["text"], "hello");
+        assert!(lock(&process.child).try_wait().unwrap().is_none());
+        drop(process);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stops_a_plugin_that_does_not_answer() {
+        let root = temp_root("silent");
+        let plugin = fake_plugin(
+            &root,
+            &format!("cat initialize.frame\n{HANG}"),
+            &[("initialize.frame", response(1, json!({})))],
+        );
+        let (mut process, _) = start_fake(&plugin, &root, FAST).unwrap();
+
+        let started = Instant::now();
+        let loaded = process.call("transcription.loadModel", json!({}), &mut |_, _| {});
+        assert!(matches!(loaded, Err(PluginError::TimedOut(m)) if m == "transcription.loadModel"));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(killed(&process));
+        drop(process);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stops_a_plugin_that_hangs_on_start() {
+        let root = temp_root("hanging-start");
+        let plugin = fake_plugin(&root, &format!("echo $$ > pid\n{HANG}"), &[]);
+        let limits = Limits {
+            quick: Duration::from_millis(500),
+            ..FAST
+        };
+
+        let started = Instant::now();
+        let result = start_fake(&plugin, &root, limits);
+        assert!(matches!(result, Err(PluginError::TimedOut(m)) if m == "initialize"));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        let pid = std::fs::read_to_string(plugin.dir.join("pid")).unwrap();
+        assert!(!Path::new("/proc").join(pid.trim()).exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stops_a_plugin_that_stops_reading_audio() {
+        let root = temp_root("deaf");
+        let plugin = fake_plugin(
+            &root,
+            &format!("cat initialize.frame begin.frame\n{HANG}"),
+            &[
+                ("initialize.frame", response(1, json!({}))),
+                ("begin.frame", response(2, json!({}))),
+            ],
+        );
+        let (mut process, _) = start_fake(&plugin, &root, FAST).unwrap();
+
+        // Five seconds of audio overfill the pipe, so the host blocks while writing it.
+        let started = Instant::now();
+        let transcribed = process.transcribe(&[0.0; 5 * 16_000], None);
+        assert!(matches!(transcribed, Err(PluginError::TimedOut(m)) if m == "transcription"));
+        assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(killed(&process));
+        drop(process);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn gives_transcription_time_for_its_audio() {
+        let minute = 60 * SAMPLE_RATE as usize;
+        assert_eq!(
+            Limits::DEFAULT.transcription(minute),
+            Duration::from_secs(90)
+        );
     }
 }
