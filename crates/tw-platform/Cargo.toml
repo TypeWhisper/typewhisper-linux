@@ -1,6 +1,6 @@
 [package]
 name = "tw-platform"
-description = "Linux desktop services for TypeWhisper: audio capture, later portals and secrets"
+description = "Linux desktop services for TypeWhisper: audio capture, global shortcuts, text insertion"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,3 +10,6 @@ rust-version.workspace = true
 [dependencies]
 libpulse-binding.workspace = true
 libpulse-simple-binding.workspace = true
+ashpd = { version = "0.14.3", default-features = false, features = ["async-io", "global_shortcuts", "remote_desktop", "screencast", "clipboard"] }
+async-io = "2"
+futures-util = "0.3"

@@ -7,18 +7,20 @@ with local or cloud speech models, and transform the text with workflows. It is
 written in Rust with GTK 4 and libadwaita and uses the XDG desktop portals, so it
 runs on GNOME and KDE Plasma under Wayland and inside Flatpak.
 
-**Status: early development.** The repository holds the groundwork that a
-[platform spike](docs/spike-2026-11.md) verified on GNOME 51 and Plasma 6.8. The app
-cannot dictate yet.
+**Status: early development.** The app dictates: hold or tap a global shortcut,
+speak, and NVIDIA Parakeet transcribes on the CPU and pastes the text into the
+focused app. There are no settings, workflows or other engines yet. The groundwork
+comes from a [platform spike](docs/spike-2026-11.md) on GNOME 51 and Plasma 6.8.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
 | `crates/typewhisper` | The GTK 4 and libadwaita app |
-| `crates/tw-platform` | Desktop services: microphone capture now, portals and secrets next |
+| `crates/tw-platform` | Desktop services: microphone capture, global shortcut, pasting through the portals |
 | `crates/tw-formats` | Formats shared with the macOS, Windows and iOS apps, with conformance tests against fixtures written by the Mac app |
 | `crates/tw-plugin-protocol` | Wire protocol between the app and plugin processes |
+| `crates/tw-plugin-host` | Finds installed plugins, starts them and calls them |
 | `plugins/parakeet` | NVIDIA Parakeet through sherpa-onnx, as a plugin process |
 | `gnome-shell-extension` | Indicator overlay and focused-app reporting on GNOME |
 | `packaging` | Flatpak manifest, desktop file, AppStream metadata |
@@ -45,6 +47,19 @@ cargo run -p typewhisper
 
 Ubuntu 26.04: install `build-essential libgtk-4-dev libadwaita-1-dev libpulse-dev`
 and Rust through rustup.
+
+To dictate with a development build, install it for your user first:
+
+```sh
+tools/dev/install-dev.sh
+target/release/typewhisper
+```
+
+The script builds the release, installs a `.desktop` file that points at it and
+copies the Parakeet plugin to `~/.local/share/typewhisper/plugins`. The desktop
+portals refuse an app ID without a matching `.desktop` file. In the window, set up
+the shortcut, allow typing (on GNOME, switch on "Allow Remote Interaction" in the
+dialog) and download the speech model.
 
 Flatpak:
 

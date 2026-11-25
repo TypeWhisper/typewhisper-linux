@@ -3,3 +3,4 @@
 build-dir/
 /repo
 *.wav
+__pycache__/

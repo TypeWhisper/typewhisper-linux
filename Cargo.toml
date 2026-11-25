@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/TypeWhisper/typewhisper-linux"
-rust-version = "1.88"
+rust-version = "1.92"
 
 [workspace.dependencies]
 gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
@@ -17,6 +17,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 libpulse-binding = "2"
 libpulse-simple-binding = "2"
 tw-plugin-protocol = { path = "crates/tw-plugin-protocol" }
+tw-plugin-host = { path = "crates/tw-plugin-host" }
+tw-platform = { path = "crates/tw-platform" }
 
 [profile.release]
 lto = "thin"
