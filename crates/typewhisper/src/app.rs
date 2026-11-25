@@ -10,6 +10,7 @@ use adw::prelude::*;
 use futures_util::StreamExt;
 use gtk::{gio, glib};
 use serde_json::{Value, json};
+use tw_platform::accessibility::FocusedField;
 use tw_platform::audio::{Recorder, SAMPLE_RATE};
 use tw_platform::insert::TextInserter;
 use tw_platform::settings::{self, Settings};
@@ -18,6 +19,7 @@ use tw_platform::zbus;
 use tw_plugin_host::{PluginError, PluginProcess, discover, plugin_dirs};
 
 use crate::APP_ID;
+use crate::formatting;
 use crate::shell_bridge::ShellBridge;
 
 const PARAKEET: &str = "com.typewhisper.parakeet";
@@ -33,6 +35,7 @@ const INSERTED_FEEDBACK: Duration = Duration::from_millis(900);
 const ERROR_FEEDBACK: Duration = Duration::from_secs(3);
 
 struct Ui {
+    window: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     hero_icon: gtk::Image,
     hero_spinner: adw::Spinner,
@@ -56,6 +59,8 @@ struct Ui {
     last_group: adw::PreferencesGroup,
     last_row: adw::ActionRow,
     preserve_clipboard: adw::SwitchRow,
+    app_formatting: adw::SwitchRow,
+    standalone_value_period: adw::SwitchRow,
 }
 
 #[derive(Clone, Default, PartialEq)]
@@ -90,6 +95,8 @@ enum Phase {
 struct State {
     connection: Option<zbus::Connection>,
     inserter: Option<Rc<TextInserter>>,
+    /// Reads the text around the cursor for app-aware formatting.
+    focused_field: Option<Rc<FocusedField>>,
     shortcut: Option<BoundShortcut>,
     interpreter: PressInterpreter,
     recorder: Option<Recorder>,
@@ -142,9 +149,6 @@ pub fn startup(application: &adw::Application) {
     let bridge = application
         .dbus_connection()
         .and_then(|c| ShellBridge::register(c).ok());
-    let settings = Settings::load();
-    ui.preserve_clipboard
-        .set_active(settings.bool(settings::PRESERVE_CLIPBOARD, false));
     let app = Rc::new(App {
         ui,
         state: RefCell::new(State {
@@ -152,7 +156,7 @@ pub fn startup(application: &adw::Application) {
             starting: true,
             ..Default::default()
         }),
-        settings: RefCell::new(settings),
+        settings: RefCell::new(Settings::load()),
     });
     app.refresh_model();
     app.refresh_typing_row();
@@ -179,22 +183,37 @@ pub fn startup(application: &adw::Application) {
             glib::spawn_future_local(download_model(Rc::clone(&app)));
         }
     ));
-    app.ui
-        .preserve_clipboard
-        .connect_active_notify(glib::clone!(
-            #[weak]
-            app,
-            move |row| {
-                let saved = app
-                    .settings
-                    .borrow_mut()
-                    .set_bool(settings::PRESERVE_CLIPBOARD, row.is_active());
-                if let Err(error) = saved {
-                    app.toast(&format!("The setting could not be saved: {error}"));
-                }
-            }
-        ));
+    for (row, key, default) in [
+        (
+            &app.ui.preserve_clipboard,
+            settings::PRESERVE_CLIPBOARD,
+            false,
+        ),
+        (&app.ui.app_formatting, settings::APP_FORMATTING, true),
+        (
+            &app.ui.standalone_value_period,
+            settings::STRIP_STANDALONE_VALUE_PERIOD,
+            true,
+        ),
+    ] {
+        bind_setting(&app, row, key, default);
+    }
     glib::spawn_future_local(initialize(app));
+}
+
+/// Shows a setting in a switch row and saves every change right away.
+fn bind_setting(app: &Rc<App>, row: &adw::SwitchRow, key: &'static str, default: bool) {
+    row.set_active(app.settings.borrow().bool(key, default));
+    row.connect_active_notify(glib::clone!(
+        #[weak]
+        app,
+        move |row| {
+            let saved = app.settings.borrow_mut().set_bool(key, row.is_active());
+            if let Err(error) = saved {
+                app.toast(&format!("The setting could not be saved: {error}"));
+            }
+        }
+    ));
 }
 
 pub fn activate(application: &adw::Application) {
@@ -348,16 +367,41 @@ fn build_ui(application: &adw::Application) -> Ui {
         .build();
     last_group.add(&last_row);
 
-    let preserve_clipboard = adw::SwitchRow::builder()
-        .title("Preserve clipboard content")
-        .subtitle(
-            "Restores your clipboard after text insertion. Without this, your clipboard \
-             contains the transcribed text after dictation.",
-        )
-        .build();
-    preserve_clipboard.add_prefix(&gtk::Image::from_icon_name("edit-copy-symbolic"));
+    let switch_row = |title: &str, subtitle: &str, icon: &str| {
+        let row = adw::SwitchRow::builder()
+            .title(title)
+            .subtitle(subtitle)
+            .build();
+        row.add_prefix(&gtk::Image::from_icon_name(icon));
+        row
+    };
+    let preserve_clipboard = switch_row(
+        "Preserve clipboard content",
+        "Restores your clipboard after text insertion. Without this, your clipboard \
+         contains the transcribed text after dictation.",
+        "edit-copy-symbolic",
+    );
     let clipboard = adw::PreferencesGroup::builder().title("Clipboard").build();
     clipboard.add(&preserve_clipboard);
+
+    let app_formatting = switch_row(
+        "App-aware formatting",
+        "When enabled, TypeWhisper uses target-app rules and available cursor context \
+         for smarter insertion.",
+        "insert-text-symbolic",
+    );
+    let standalone_value_period = switch_row(
+        "Strip final period from standalone values",
+        "Removes a model-added period when a dictated email address, URL, number, or \
+         version string is inserted on its own, keeping the value usable in form fields. \
+         Abbreviations, dates, and sentences are left alone.",
+        "format-text-plaintext-symbolic",
+    );
+    let formatting = adw::PreferencesGroup::builder()
+        .title("Output Formatting")
+        .build();
+    formatting.add(&app_formatting);
+    formatting.add(&standalone_value_period);
 
     let page = adw::PreferencesPage::new();
     page.add(&status);
@@ -366,6 +410,7 @@ fn build_ui(application: &adw::Application) -> Ui {
     page.add(&hotkey);
     page.add(&engine);
     page.add(&clipboard);
+    page.add(&formatting);
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&page));
 
@@ -385,7 +430,7 @@ fn build_ui(application: &adw::Application) -> Ui {
     view.set_content(Some(&toasts));
 
     // The application keeps the window; activate() presents it again.
-    let _window = adw::ApplicationWindow::builder()
+    let window = adw::ApplicationWindow::builder()
         .application(application)
         .title("TypeWhisper")
         .default_width(560)
@@ -394,6 +439,7 @@ fn build_ui(application: &adw::Application) -> Ui {
         .content(&view)
         .build();
     Ui {
+        window,
         toasts,
         hero_icon,
         hero_spinner,
@@ -417,6 +463,8 @@ fn build_ui(application: &adw::Application) -> Ui {
         last_group,
         last_row,
         preserve_clipboard,
+        app_formatting,
+        standalone_value_period,
     }
 }
 
@@ -713,6 +761,7 @@ async fn initialize(app: Rc<App>) {
             let token = tw_platform::state_dir()
                 .map(|d| d.join("remote-desktop-token"))
                 .unwrap_or_else(|_| "remote-desktop-token".into());
+            glib::spawn_future_local(connect_focused_field(Rc::clone(&app), connection.clone()));
             let mut state = app.state.borrow_mut();
             state.inserter = Some(Rc::new(TextInserter::new(connection.clone(), token)));
             state.connection = Some(connection);
@@ -737,6 +786,15 @@ async fn initialize(app: Rc<App>) {
     app.state.borrow_mut().starting = false;
     app.refresh_hero();
     start_plugin(Rc::clone(&app)).await;
+}
+
+/// Connects to the accessibility bus for app-aware formatting. Without it,
+/// dictations are inserted unchanged.
+async fn connect_focused_field(app: Rc<App>, session: zbus::Connection) {
+    match FocusedField::connect(&session).await {
+        Ok(field) => app.state.borrow_mut().focused_field = Some(Rc::new(field)),
+        Err(error) => eprintln!("typewhisper: no cursor context for formatting: {error}"),
+    }
 }
 
 async fn bind_shortcut(app: Rc<App>) {
@@ -981,11 +1039,29 @@ fn stop_recording(app: Rc<App>) {
                 app.ui.last_group.set_visible(true);
                 match inserter {
                     Some(inserter) => {
-                        let preserve = app
-                            .settings
-                            .borrow()
-                            .bool(settings::PRESERVE_CLIPBOARD, false);
-                        let inserted = inserter.insert(&text, preserve).await;
+                        let (preserve, app_formatting, standalone_value_period) = {
+                            let stored = app.settings.borrow();
+                            (
+                                stored.bool(settings::PRESERVE_CLIPBOARD, false),
+                                stored.bool(settings::APP_FORMATTING, true),
+                                stored.bool(settings::STRIP_STANDALONE_VALUE_PERIOD, true),
+                            )
+                        };
+                        let field = app.state.borrow().focused_field.clone();
+                        let context = match field {
+                            // The paste goes to TypeWhisper's own window then.
+                            Some(field) if app_formatting && !app.ui.window.is_active() => {
+                                field.context().await
+                            }
+                            _ => None,
+                        };
+                        let formatted = formatting::text_for_insertion(
+                            &text,
+                            context.as_ref(),
+                            app_formatting,
+                            standalone_value_period,
+                        );
+                        let inserted = inserter.insert(&formatted, preserve).await;
                         app.refresh_typing_row();
                         match inserted {
                             Ok(()) => {

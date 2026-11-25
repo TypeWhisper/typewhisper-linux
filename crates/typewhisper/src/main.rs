@@ -1,4 +1,5 @@
 mod app;
+mod formatting;
 mod shell_bridge;
 
 use adw::prelude::*;
