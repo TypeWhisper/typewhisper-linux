@@ -20,6 +20,7 @@ use tw_plugin_host::{PluginError, PluginProcess, discover, plugin_dirs};
 
 use crate::APP_ID;
 use crate::formatting;
+use crate::overlay::Overlay;
 use crate::shell_bridge::ShellBridge;
 
 const PARAKEET: &str = "com.typewhisper.parakeet";
@@ -111,6 +112,8 @@ struct State {
     /// Counts indicator updates, so that a feedback timer only hides its own state.
     indicator_generation: u64,
     bridge: Option<ShellBridge>,
+    /// The indicator on desktops with a layer shell; GNOME has the extension.
+    overlay: Option<Overlay>,
 }
 
 struct App {
@@ -153,6 +156,7 @@ pub fn startup(application: &adw::Application) {
         ui,
         state: RefCell::new(State {
             bridge,
+            overlay: Overlay::new(),
             starting: true,
             ..Default::default()
         }),
@@ -506,12 +510,16 @@ impl App {
             .add_toast(adw::Toast::builder().title(text).use_markup(false).build());
     }
 
-    /// Sends a state to the indicator; `idle` hides it.
+    /// Sends a state to the indicator; `idle` hides it. The GNOME Shell
+    /// extension draws it from the bus signal, the overlay on other desktops.
     fn indicator(&self, state: &str, text: &str) {
         let mut app_state = self.state.borrow_mut();
         app_state.indicator_generation += 1;
         if let Some(bridge) = app_state.bridge.as_ref() {
             bridge.set_state(state, text);
+        }
+        if let Some(overlay) = app_state.overlay.as_ref() {
+            overlay.set_state(state, text);
         }
     }
 
