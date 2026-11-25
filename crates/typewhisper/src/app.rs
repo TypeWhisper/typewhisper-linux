@@ -981,14 +981,17 @@ fn stop_recording(app: Rc<App>) {
 enum CallError {
     /// The plugin or the recording reported an error; the process is fine.
     Failed(String),
-    /// The plugin process died, panicked a worker or no longer answers in order.
+    /// The plugin process died, stopped answering, panicked a worker or no
+    /// longer answers in order.
     Lost,
 }
 
 impl From<PluginError> for CallError {
     fn from(error: PluginError) -> Self {
         match error {
-            PluginError::Io(_) | PluginError::Protocol(_) => CallError::Lost,
+            PluginError::Io(_) | PluginError::Protocol(_) | PluginError::TimedOut(_) => {
+                CallError::Lost
+            }
             other => CallError::Failed(other.to_string()),
         }
     }
