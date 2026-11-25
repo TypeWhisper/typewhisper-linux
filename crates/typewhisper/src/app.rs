@@ -256,9 +256,11 @@ async fn start_kwin_script(app: Rc<App>, connection: gio::DBusConnection) {
         Some(bridge) => bridge.accept_kwin_reports(kwin),
         None => return,
     }
-    match kwin_script::load(&connection).await {
-        Ok(()) => app.state.borrow_mut().kwin_script = true,
-        Err(error) => eprintln!("typewhisper: KWin does not report the active window: {error}"),
+    // Set first, so that quitting while the script starts still unloads it.
+    app.state.borrow_mut().kwin_script = true;
+    if let Err(error) = kwin_script::load(&connection).await {
+        app.state.borrow_mut().kwin_script = false;
+        eprintln!("typewhisper: KWin does not report the active window: {error}");
     }
 }
 

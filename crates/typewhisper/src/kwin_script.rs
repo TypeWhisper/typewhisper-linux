@@ -5,7 +5,7 @@
 //!
 //! Inside Flatpak the app may not talk to KWin, so there are no reports there.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gtk::gio;
 use gtk::glib::{self, prelude::ToVariant};
@@ -65,7 +65,8 @@ pub async fn kwin_name(connection: &gio::DBusConnection) -> Option<String> {
     reply.get::<(String,)>().map(|(name,)| name)
 }
 
-/// Loads and starts the script.
+/// Loads and starts the script. On an error, KWin may still have loaded it,
+/// for example when `run` timed out, so the script is unloaded again.
 pub async fn load(connection: &gio::DBusConnection) -> Result<(), glib::Error> {
     let path = script_path();
     let written = path
@@ -79,6 +80,15 @@ pub async fn load(connection: &gio::DBusConnection) -> Result<(), glib::Error> {
         ));
     }
     let _ = scripting(connection, "unloadScript", (PLUGIN,).to_variant()).await;
+    let started = start(connection, &path).await;
+    if started.is_err() {
+        let _ = scripting(connection, "unloadScript", (PLUGIN,).to_variant()).await;
+        let _ = std::fs::remove_file(&path);
+    }
+    started
+}
+
+async fn start(connection: &gio::DBusConnection, path: &Path) -> Result<(), glib::Error> {
     let reply = scripting(
         connection,
         "loadScript",
