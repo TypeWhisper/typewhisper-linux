@@ -128,21 +128,28 @@ impl TextInserter {
             .start(session, None, StartOptions::default())
             .await?
             .response()?;
-        // Every start returns a new token; the old one is used up.
-        if let Some(token) = selected.restore_token() {
-            write_private(&self.token_file, token);
-        }
-        if !selected.devices().contains(DeviceType::KEYBOARD) {
-            return Err(InsertError::NotAllowed(
-                "TypeWhisper may not type. Allow remote interaction in the desktop's dialog.",
-            ));
-        }
-        if !selected.is_clipboard_enabled() {
-            return Err(InsertError::NotAllowed(
+        let refusal = if !selected.devices().contains(DeviceType::KEYBOARD) {
+            Some("TypeWhisper may not type. Allow remote interaction in the desktop's dialog.")
+        } else if !selected.is_clipboard_enabled() {
+            Some(
                 "TypeWhisper may not use the clipboard. Allow clipboard access in the desktop's dialog.",
-            ));
+            )
+        } else {
+            None
+        };
+        // Every start returns a new token; the old one is used up. A token for an
+        // incomplete grant is dropped, so the next attempt shows the dialog again
+        // and the app does not count it as approved.
+        match (refusal, selected.restore_token()) {
+            (None, Some(token)) => write_private(&self.token_file, token),
+            _ => {
+                let _ = std::fs::remove_file(&self.token_file);
+            }
         }
-        Ok(())
+        match refusal {
+            Some(text) => Err(InsertError::NotAllowed(text)),
+            None => Ok(()),
+        }
     }
 }
 

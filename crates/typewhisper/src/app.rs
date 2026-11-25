@@ -334,8 +334,10 @@ async fn approve_typing(app: Rc<App>) {
         return;
     };
     app.ui.typing_button.set_sensitive(false);
-    if let Err(error) = inserter.approve().await {
-        app.set_status(&error.to_string());
+    match inserter.approve().await {
+        Ok(()) if app.state.borrow().model_ready => app.set_status("Ready"),
+        Ok(()) => {}
+        Err(error) => app.set_status(&error.to_string()),
     }
     app.ui.typing_button.set_sensitive(true);
     app.refresh_typing_row();

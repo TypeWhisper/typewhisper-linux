@@ -3,10 +3,16 @@
 //! The desktop owns the key binding: the app suggests a trigger, the user
 //! confirms or changes it in a system dialog, and later sessions bind silently.
 
+use std::collections::HashMap;
+
 use ashpd::desktop::global_shortcuts::{BindShortcutsOptions, GlobalShortcuts, NewShortcut};
 use ashpd::desktop::{CreateSessionOptions, Session};
-use ashpd::zbus;
-use futures_util::{Stream, StreamExt, future, stream};
+use ashpd::zbus::{self, MatchRule, MessageStream, OwnedObjectPath, OwnedVariant};
+use futures_util::{Stream, StreamExt, future};
+
+const PORTAL_NAME: &str = "org.freedesktop.portal.Desktop";
+const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+const INTERFACE: &str = "org.freedesktop.portal.GlobalShortcuts";
 
 pub const DICTATE: &str = "dictate";
 /// XDG shortcuts format. KDE Plasma ignores GTK-style triggers such as
@@ -38,8 +44,20 @@ pub async fn bind(
     let session = portal
         .create_session(CreateSessionOptions::default())
         .await?;
-    let activated = portal.receive_activated().await?;
-    let deactivated = portal.receive_deactivated().await?;
+    // One stream for Activated and Deactivated keeps them in the order the bus
+    // delivered them. Two merged streams could hand over a release before an
+    // older auto-repeat, which would then count as a new press.
+    let owner = zbus::fdo::DBusProxy::new(connection)
+        .await?
+        .get_name_owner(PORTAL_NAME.try_into()?)
+        .await?;
+    let rule = MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .sender(owner.as_str())
+        .path(PORTAL_PATH)
+        .interface(INTERFACE)
+        .build()?;
+    let signals = MessageStream::for_match_rule(rule, connection, None).await?;
 
     let shortcut = NewShortcut::new(DICTATE, description).preferred_trigger(DEFAULT_TRIGGER);
     let response = portal
@@ -55,24 +73,9 @@ pub async fn bind(
 
     // The portal sends these signals only to the session's owner, and this
     // connection holds one shortcuts session, so the shortcut ID is enough.
-    let downs = activated
-        .filter(|a| future::ready(a.shortcut_id() == DICTATE))
-        .map(|_| true);
-    let ups = deactivated
-        .filter(|d| future::ready(d.shortcut_id() == DICTATE))
-        .map(|_| false);
-    // GNOME repeats Activated while the key is held; only the first one counts.
-    let events = stream::select(downs, ups)
-        .scan(false, |held, down| {
-            let event = match (down, *held) {
-                (true, false) => Some(ShortcutEvent::Pressed),
-                (true, true) => None,
-                (false, _) => Some(ShortcutEvent::Released),
-            };
-            *held = down;
-            future::ready(Some(event))
-        })
-        .filter_map(future::ready);
+    let downs =
+        signals.filter_map(|message| future::ready(message.ok().and_then(|m| key_down(&m))));
+    let events = collapse_repeats(downs);
 
     Ok((
         BoundShortcut {
@@ -82,6 +85,37 @@ pub async fn bind(
         },
         events,
     ))
+}
+
+/// `Some(true)` for Activated, `Some(false)` for Deactivated of the dictation shortcut.
+fn key_down(message: &zbus::Message) -> Option<bool> {
+    let down = match message.header().member()?.as_str() {
+        "Activated" => true,
+        "Deactivated" => false,
+        _ => return None,
+    };
+    let (_session, id, _timestamp, _options): (
+        OwnedObjectPath,
+        String,
+        u64,
+        HashMap<String, OwnedVariant>,
+    ) = message.body().deserialize().ok()?;
+    (id == DICTATE).then_some(down)
+}
+
+/// GNOME repeats Activated while the key is held; only the first one counts.
+fn collapse_repeats(downs: impl Stream<Item = bool>) -> impl Stream<Item = ShortcutEvent> {
+    downs
+        .scan(false, |held, down| {
+            let event = match (down, *held) {
+                (true, false) => Some(ShortcutEvent::Pressed),
+                (true, true) => None,
+                (false, _) => Some(ShortcutEvent::Released),
+            };
+            *held = down;
+            future::ready(Some(event))
+        })
+        .filter_map(future::ready)
 }
 
 /// Makes the desktop's trigger description readable.
@@ -199,6 +233,21 @@ mod tests {
         assert_eq!(
             p.on_event(ShortcutEvent::Released, t + Duration::from_secs(2)),
             Some(Command::Stop)
+        );
+    }
+
+    #[test]
+    fn repeated_activations_count_as_one_press() {
+        let downs = futures_util::stream::iter([true, true, true, false, true, false]);
+        let events: Vec<_> = async_io::block_on(collapse_repeats(downs).collect());
+        assert_eq!(
+            events,
+            [
+                ShortcutEvent::Pressed,
+                ShortcutEvent::Released,
+                ShortcutEvent::Pressed,
+                ShortcutEvent::Released
+            ]
         );
     }
 

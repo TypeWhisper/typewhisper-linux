@@ -9,8 +9,10 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-target="${1:-${CARGO_TARGET_DIR:-$repo/target}}/release"
-cargo build --release --locked -p typewhisper -p tw-plugin-parakeet --manifest-path "$repo/Cargo.toml"
+target_dir="${1:-${CARGO_TARGET_DIR:-$repo/target}}"
+target="$target_dir/release"
+cargo build --release --locked --target-dir "$target_dir" \
+  -p typewhisper -p tw-plugin-parakeet --manifest-path "$repo/Cargo.toml"
 
 data="${XDG_DATA_HOME:-$HOME/.local/share}"
 apps="$data/applications"
