@@ -188,7 +188,7 @@ export default class TypeWhisperExtension extends Extension {
             (connection, result) => {
                 try {
                     connection.call_finish(result);
-                } catch (e) {
+                } catch {
                     // The app may have quit between the check and the call.
                 }
             });

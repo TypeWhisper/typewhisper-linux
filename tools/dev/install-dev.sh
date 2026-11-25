@@ -20,6 +20,7 @@ cargo build --release --locked --target-dir "$target_dir" \
 # Quotes a path as one argument of an Exec key: the quoting rule escapes
 # " ` $ and \, the string rule then doubles every backslash, and % becomes %%.
 desktop_quote() {
+  # shellcheck disable=SC1003  # a lone backslash, not an escaped quote
   local s=$1 bs='\'
   s=${s//"$bs"/"$bs$bs"}
   s=${s//'"'/"$bs\""}

@@ -1,0 +1,13 @@
+{
+  "name": "typewhisper-gnome-shell-extension-lint",
+  "private": true,
+  "description": "Lint setup for the GNOME Shell extension. Nothing in this folder ships except typewhisper@typewhisper.com.",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint typewhisper@typewhisper.com"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0"
+  }
+}
