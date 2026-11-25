@@ -171,6 +171,17 @@ def mac_translations(path, mac_language):
     return result
 
 
+def placeholder_problems(text, translation):
+    """What is wrong with the placeholders of `translation`; empty when it keeps those of `text`."""
+    expected = sorted(LINUX_PLACEHOLDER.findall(text))
+    found = sorted(LINUX_PLACEHOLDER.findall(translation))
+    problems = [f"missing {name}" for name in expected if name not in found]
+    problems += [f"unknown {name}" for name in found if name not in expected]
+    if not problems and expected != found:
+        problems.append("placeholders repeated")
+    return problems
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("catalog", nargs="?", help="the macOS Localizable.xcstrings to take translations from")
@@ -181,6 +192,7 @@ def main():
     languages = (PO_DIR / "LINGUAS").read_text(encoding="utf-8").split()
     stale = []
     missing = 0
+    broken = 0
     outputs = {PO_DIR / f"{DOMAIN}.pot": render(texts, {}, "")}
     for language in languages:
         path = PO_DIR / f"{language}.po"
@@ -200,6 +212,11 @@ def main():
         print(f"{language}: {imported} imported, {len(todo)} missing, {len(dropped)} no longer used")
         for text in todo:
             print("  missing: " + json.dumps(text, ensure_ascii=False))
+        for text, translation in translations.items():
+            problems = placeholder_problems(text, translation)
+            broken += bool(problems)
+            if problems:
+                print(f"  {', '.join(problems)}: " + json.dumps(text, ensure_ascii=False))
     for path, content in outputs.items():
         current = path.read_text(encoding="utf-8") if path.exists() else None
         if current == content:
@@ -211,7 +228,7 @@ def main():
                 file.write(content)
     for path in stale:
         print(f"out of date: {path} (run tools/i18n/update-translations.py)")
-    return 1 if stale or (arguments.check and missing) else 0
+    return 1 if stale or broken or (arguments.check and missing) else 0
 
 
 if __name__ == "__main__":

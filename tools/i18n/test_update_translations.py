@@ -40,5 +40,19 @@ class PoFileTest(unittest.TestCase):
             self.assertEqual(update.read_po(path), {})
 
 
+class PlaceholderTest(unittest.TestCase):
+    def test_reordered_placeholders_are_fine(self):
+        self.assertEqual(update.placeholder_problems("Remove {app}", "{app} entfernen"), [])
+
+    def test_missing_placeholder(self):
+        self.assertEqual(update.placeholder_problems("Press {key} to begin.", "Drücke, um loszulegen."), ["missing {key}"])
+
+    def test_renamed_placeholder(self):
+        self.assertEqual(
+            update.placeholder_problems("Add “{app_id}”", "„{app}“ hinzufügen"),
+            ["missing {app_id}", "unknown {app}"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

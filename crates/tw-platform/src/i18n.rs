@@ -37,11 +37,34 @@ pub const fn n_(text: &'static str) -> &'static str {
     text
 }
 
-fn fill(mut text: String, values: &[(&str, &str)]) -> String {
-    for (name, value) in values {
-        text = text.replace(&format!("{{{name}}}"), value);
+/// Reads the template once, so that a value that itself contains a
+/// placeholder, such as an error message, stays as it is.
+fn fill(template: String, values: &[(&str, &str)]) -> String {
+    let mut filled = String::with_capacity(template.len());
+    let mut rest = template.as_str();
+    while let Some(open) = rest.find('{') {
+        filled.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let value = after.find('}').and_then(|close| {
+            let name = &after[..close];
+            values
+                .iter()
+                .find(|(known, _)| *known == name)
+                .map(|(_, value)| (*value, close))
+        });
+        match value {
+            Some((value, close)) => {
+                filled.push_str(value);
+                rest = &after[close + 1..];
+            }
+            None => {
+                filled.push('{');
+                rest = after;
+            }
+        }
     }
-    text
+    filled.push_str(rest);
+    filled
 }
 
 /// `share/locale` next to the executable's `bin` directory, which covers
@@ -92,6 +115,13 @@ mod tests {
     fn fills_named_placeholders_in_any_order() {
         let text = "{b} vor {a}".to_owned();
         assert_eq!(fill(text, &[("a", "eins"), ("b", "zwei")]), "zwei vor eins");
+    }
+
+    #[test]
+    fn leaves_placeholders_inside_values_alone() {
+        let values = [("a", "{b}"), ("b", "done")];
+        assert_eq!(fill("{a} / {b}".to_owned(), &values), "{b} / done");
+        assert_eq!(fill("{unknown} {a}".to_owned(), &values), "{unknown} {b}");
     }
 
     #[test]
