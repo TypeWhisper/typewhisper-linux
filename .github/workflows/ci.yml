@@ -109,8 +109,12 @@ jobs:
         # Cargo then skips the script and links against the missing libraries
         # whenever it rebuilds the crate.
         run: |
+          cargo --version
+          ls target target/debug 2>&1 | head -30
+          find target -maxdepth 4 \( -path '*sherpa-onnx-prebuilt*' -o -path '*sherpa-onnx-sys*' -o -path '*sherpa_onnx_sys*' \) | head -30
           set -- target/sherpa-onnx-prebuilt/*/lib
           if [ ! -d "$1" ]; then
+            echo "libraries missing, removing the crate's build state"
             rm -rf target/*/build/sherpa-onnx-sys
           fi
       - name: Format
