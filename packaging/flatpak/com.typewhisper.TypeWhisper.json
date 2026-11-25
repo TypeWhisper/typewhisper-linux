@@ -11,7 +11,9 @@
     "--socket=pulseaudio",
     "--share=ipc",
     "--share=network",
-    "--device=dri"
+    "--device=dri",
+    "--talk-name=org.a11y.Bus",
+    "--filesystem=xdg-run/at-spi"
   ],
   "add-extensions": {
     "com.typewhisper.TypeWhisper.Plugin": {

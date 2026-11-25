@@ -79,15 +79,20 @@ impl FocusedField {
     }
 }
 
-/// Sessions and Flatpak set `AT_SPI_BUS_ADDRESS`; otherwise the session bus knows it.
+/// Sessions set `AT_SPI_BUS_ADDRESS`; otherwise the session bus knows it.
+///
+/// Inside Flatpak the variable points to a filtered proxy that shows no other
+/// apps, so the real bus from `org.a11y.Bus` comes first there. The manifest
+/// grants that name and the bus socket under `xdg-run/at-spi`.
 async fn bus_address(session: &zbus::Connection) -> zbus::Result<String> {
-    if let Some(address) = std::env::var("AT_SPI_BUS_ADDRESS")
+    let from_environment = std::env::var("AT_SPI_BUS_ADDRESS")
         .ok()
-        .filter(|a| !a.is_empty())
-    {
+        .filter(|a| !a.is_empty());
+    let in_flatpak = std::env::var_os("FLATPAK_ID").is_some();
+    if !in_flatpak && let Some(address) = from_environment {
         return Ok(address);
     }
-    session
+    let reported = session
         .call_method(
             Some("org.a11y.Bus"),
             "/org/a11y/bus",
@@ -95,9 +100,13 @@ async fn bus_address(session: &zbus::Connection) -> zbus::Result<String> {
             "GetAddress",
             &(),
         )
-        .await?
-        .body()
-        .deserialize()
+        .await
+        .and_then(|reply| reply.body().deserialize::<String>());
+    match (reported, from_environment) {
+        (Ok(address), _) => Ok(address),
+        (Err(_), Some(address)) => Ok(address),
+        (Err(error), None) => Err(error),
+    }
 }
 
 /// The focused editable object in the active window. `None` while one of
