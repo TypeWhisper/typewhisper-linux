@@ -4,11 +4,73 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref_name }}
+  # A newer push to a pull request replaces the run; every push to main keeps its run.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  checks:
+    name: Scripts and packaging
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The pull request merge commit's first parent is the base branch.
+          fetch-depth: 2
+
+      - name: Check whitespace and conflict markers
+        if: github.event_name == 'pull_request'
+        run: git diff --check HEAD^1 HEAD
+
+      - name: Install the validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends appstream desktop-file-utils shellcheck
+
+      - name: Lint the shell scripts
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck
+
+      - name: Lint the Python tools
+        # Syntax errors and pyflakes only: undefined names, unused imports and the like.
+        run: pipx run ruff==0.17.6 check --isolated --select E9,F tools
+
+      - name: Test the CI scripts
+        run: python3 -m unittest discover -s tools/ci -p 'test_*.py'
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: gnome-shell-extension/package-lock.json
+
+      - name: Lint the GNOME Shell extension
+        working-directory: gnome-shell-extension
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint
+
+      - name: Check the JSON files
+        run: |
+          git ls-files -z '*.json' ':!:*package-lock.json' | while IFS= read -r -d '' file; do
+            python3 -m json.tool "$file" > /dev/null || { echo "::error file=$file::Invalid JSON"; exit 1; }
+          done
+
+      - name: Validate the desktop file
+        run: desktop-file-validate packaging/*.desktop
+
+      - name: Validate the AppStream metadata
+        run: appstreamcli validate --no-net packaging/*.metainfo.xml packaging/flatpak/*.metainfo.xml
+
   rust:
     name: Rust (${{ matrix.arch }})
     strategy:
@@ -16,22 +78,90 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
           - arch: aarch64
-            runner: ubuntu-24.04-arm
+            runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     # Fedora carries GTK and libadwaita versions close to current GNOME.
     container: registry.fedoraproject.org/fedora:45
     steps:
       - name: Install build dependencies
+        # tar and zstd are for the cargo cache.
         run: >
           dnf install -y --setopt=install_weak_deps=False
-          git gcc gcc-c++ cargo rust clippy rustfmt
+          git gcc gcc-c++ cargo rust clippy rustfmt tar zstd
           gtk4-devel libadwaita-devel pulseaudio-libs-devel
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Restore the cargo cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Pull requests read the cache that main wrote.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+
+  # Builds the app and the Parakeet add-on with the commands from the README, installs both
+  # and starts the plugin inside the app's sandbox.
+  flatpak:
+    name: Flatpak (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-26.04
+          - arch: aarch64
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    container:
+      # Carries flatpak-builder and the GNOME runtime and SDK of the manifests.
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      # flatpak-builder runs the build in a bubblewrap sandbox.
+      options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and install the app
+        run: >
+          flatpak-builder --install --force-clean --disable-rofiles-fuse --install-deps-from=flathub
+          build-dir packaging/flatpak/com.typewhisper.TypeWhisper.json
+      - name: Build and install the Parakeet add-on
+        run: >
+          flatpak-builder --install --force-clean --disable-rofiles-fuse
+          build-dir-parakeet packaging/flatpak/com.typewhisper.TypeWhisper.Plugin.Parakeet.json
+      - name: Start the plugin inside the app's sandbox
+        run: |
+          flatpak run --command=sh com.typewhisper.TypeWhisper -c 'test -x /app/bin/typewhisper'
+          flatpak run --filesystem="$PWD:ro" --command=python3 com.typewhisper.TypeWhisper \
+            "$PWD/tools/ci/plugin_smoke.py" /app/plugins/Parakeet/com.typewhisper.parakeet
+
+  # Single required status check for the main ruleset.
+  ci-ok:
+    name: CI ok
+    if: always()
+    needs: [checks, rust, flatpak]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to succeed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          failed="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "::error::Not every CI job succeeded"
+            printf '%s\n' "$failed"
+            exit 1
+          fi
+          echo "All CI jobs succeeded"

@@ -3,7 +3,8 @@
 # shell runs headless on a virtual monitor. Used over SSH, no display needed.
 set -euo pipefail
 
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 
 # Stop the minimal shell from start-gnome-headless.sh, if it runs.
