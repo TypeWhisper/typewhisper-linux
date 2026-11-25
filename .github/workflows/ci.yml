@@ -101,6 +101,19 @@ jobs:
         with:
           # Pull requests read the cache that main wrote.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Let sherpa-onnx unpack its libraries again
+        # The sherpa-onnx-sys build script unpacks prebuilt libraries into
+        # target/sherpa-onnx-prebuilt/<archive>/lib and skips the download when
+        # that folder exists. The cache restores the folder without the libraries
+        # in it, and keeps the crate's build state. Cargo then links against the
+        # empty folder whenever it rebuilds the crate. `cargo clean -p` finds that
+        # state in the old and the new build-dir layout.
+        run: |
+          set -- target/sherpa-onnx-prebuilt/*/lib/libsherpa-onnx-c-api.a
+          if [ ! -f "$1" ]; then
+            rm -rf target/sherpa-onnx-prebuilt
+            cargo clean --locked -p sherpa-onnx-sys
+          fi
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -132,9 +145,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The image's runtimes sit in a lower overlayfs layer. Updating them moves
+      # their old folders, which some x86_64 runners refuse with "Invalid
+      # cross-device link". So the build uses them as they are and only the
+      # missing Rust extension is installed; a fresh install moves nothing.
+      - name: Install the Rust SDK extension
+        run: >
+          flatpak install --system --noninteractive -y flathub
+          org.freedesktop.Sdk.Extension.rust-stable//26.08
       - name: Build and install the app
         run: >
-          flatpak-builder --install --force-clean --disable-rofiles-fuse --install-deps-from=flathub
+          flatpak-builder --install --force-clean --disable-rofiles-fuse
           build-dir packaging/flatpak/com.typewhisper.TypeWhisper.json
       - name: Build and install the Parakeet add-on
         run: >
