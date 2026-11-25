@@ -24,7 +24,7 @@ comes from a [platform spike](docs/spike-2026-11.md) on GNOME 51 and Plasma 6.8.
 | `plugins/parakeet` | NVIDIA Parakeet through sherpa-onnx, as a plugin process |
 | `gnome-shell-extension` | Indicator overlay and focused-app reporting on GNOME |
 | `packaging` | Flatpak manifest, desktop file, AppStream metadata |
-| `tools` | Headless VM sessions and probes for portal behaviour |
+| `tools` | Headless VM sessions, probes for portal behaviour, Flatpak helpers |
 
 ## Plugins
 
@@ -71,8 +71,16 @@ flatpak run com.typewhisper.TypeWhisper
 
 The app defines the extension point `com.typewhisper.TypeWhisper.Plugin`, and each
 plugin is its own Flatpak mounted under `/app/plugins/<name>`. The second command
-builds Parakeet that way; it needs the app installed first. The manifests let cargo
-fetch crates during the build. A Flathub build will need vendored crates instead.
+builds Parakeet that way; it needs the app installed first.
+
+The builds have no network access, as on Flathub. flatpak-builder downloads every
+source beforehand and checks its hash. Cargo takes the crates from
+`packaging/flatpak/cargo-sources.json`, so after every change to `Cargo.lock` run
+`tools/flatpak/update-cargo-sources.sh` and commit the result; CI fails while the
+file is out of date. The add-on builds sherpa-onnx and its C++ libraries from
+source. ONNX Runtime is still the prebuilt static library that sherpa-onnx links
+by default, so a Flathub submission of the add-on still needs ONNX Runtime built
+from source.
 
 ## Related
 

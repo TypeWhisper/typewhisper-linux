@@ -46,6 +46,10 @@ jobs:
       - name: Test the CI scripts
         run: python3 -m unittest discover -s tools/ci -p 'test_*.py'
 
+      - name: Check the Flatpak cargo sources against Cargo.lock
+        # The Flatpak builds have no network access and take every crate from this file.
+        run: tools/flatpak/update-cargo-sources.sh --check
+
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
