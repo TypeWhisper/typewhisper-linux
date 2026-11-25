@@ -452,8 +452,13 @@ async fn load_model(app: Rc<App>) {
 async fn download_model(app: Rc<App>) {
     let plugin = app.state.borrow().plugin.clone();
     let Some(plugin) = plugin else {
-        // The process died earlier; the button now restarts it.
-        start_plugin(app).await;
+        // The process died earlier; the button now restarts it. It stays
+        // disabled meanwhile, so a second click cannot start another process.
+        app.ui.model_button.set_sensitive(false);
+        start_plugin(Rc::clone(&app)).await;
+        if app.state.borrow().plugin.is_none() {
+            app.ui.model_button.set_sensitive(true);
+        }
         return;
     };
     app.ui.model_button.set_sensitive(false);
