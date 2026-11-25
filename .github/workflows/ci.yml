@@ -105,12 +105,14 @@ jobs:
         # The sherpa-onnx-sys build script unpacks prebuilt libraries into
         # target/sherpa-onnx-prebuilt/<archive>/lib and skips the download when
         # that folder exists. The cache restores the folder without the libraries
-        # in it, and keeps the crate's build state in target/<profile>/build. Cargo
-        # then links against the empty folder whenever it rebuilds the crate.
+        # in it, and keeps the crate's build state. Cargo then links against the
+        # empty folder whenever it rebuilds the crate. `cargo clean -p` finds that
+        # state in the old and the new build-dir layout.
         run: |
           set -- target/sherpa-onnx-prebuilt/*/lib/libsherpa-onnx-c-api.a
           if [ ! -f "$1" ]; then
-            rm -rf target/sherpa-onnx-prebuilt target/*/build/sherpa-onnx-sys
+            rm -rf target/sherpa-onnx-prebuilt
+            cargo clean --locked -p sherpa-onnx-sys
           fi
       - name: Format
         run: cargo fmt --all --check
