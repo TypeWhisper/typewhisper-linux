@@ -73,6 +73,10 @@ msgid "The setting could not be saved: {error}"
 msgstr "无法保存设置：{error}"
 
 #: crates/typewhisper/src/app.rs
+msgid "Source Code"
+msgstr "源代码"
+
+#: crates/typewhisper/src/app.rs
 msgid "Keyboard and Clipboard Access"
 msgstr "键盘和剪贴板访问权限"
 
@@ -155,6 +159,10 @@ msgstr "当听写的电子邮件地址、网址、数字或版本号被单独插
 #: crates/typewhisper/src/app.rs
 msgid "Output Formatting"
 msgstr "输出格式化"
+
+#: crates/typewhisper/src/app.rs
+msgid "About TypeWhisper"
+msgstr "关于 TypeWhisper"
 
 #: crates/typewhisper/src/app.rs
 msgid "Quit"

@@ -73,6 +73,10 @@ msgid "The setting could not be saved: {error}"
 msgstr "設定を保存できませんでした: {error}"
 
 #: crates/typewhisper/src/app.rs
+msgid "Source Code"
+msgstr "ソースコード"
+
+#: crates/typewhisper/src/app.rs
 msgid "Keyboard and Clipboard Access"
 msgstr "キーボードとクリップボードへのアクセス"
 
@@ -155,6 +159,10 @@ msgstr "音声入力したメールアドレス、URL、数値、バージョン
 #: crates/typewhisper/src/app.rs
 msgid "Output Formatting"
 msgstr "出力のフォーマット"
+
+#: crates/typewhisper/src/app.rs
+msgid "About TypeWhisper"
+msgstr "TypeWhisperについて"
 
 #: crates/typewhisper/src/app.rs
 msgid "Quit"

@@ -73,6 +73,10 @@ msgid "The setting could not be saved: {error}"
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
+msgid "Source Code"
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
 msgid "Keyboard and Clipboard Access"
 msgstr ""
 
@@ -154,6 +158,10 @@ msgstr ""
 
 #: crates/typewhisper/src/app.rs
 msgid "Output Formatting"
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
+msgid "About TypeWhisper"
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
