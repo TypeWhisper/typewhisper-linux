@@ -66,7 +66,9 @@ impl ShellBridge {
         })
     }
 
-    /// `state` is `idle`, `recording` or `processing`.
+    /// `state` is `idle`, `recording`, `processing`, `inserting` or `error`.
+    /// `text` names the state in words; for `error` it is the message. An
+    /// extension that does not know a state shows `text` until `idle` follows.
     pub fn set_state(&self, state: &str, text: &str) {
         let _ = self.connection.emit_signal(
             None,
