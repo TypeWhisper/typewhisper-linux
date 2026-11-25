@@ -141,7 +141,7 @@ impl TextInserter {
                     &clipboard,
                     &session,
                     text.as_bytes(),
-                    &saved,
+                    saved.as_ref(),
                     owners,
                 )
                 .await
@@ -152,7 +152,7 @@ impl TextInserter {
                     &clipboard,
                     &session,
                     text.as_bytes(),
-                    &Vec::new(),
+                    None,
                     futures_util::stream::pending(),
                 )
                 .await
@@ -176,12 +176,17 @@ impl TextInserter {
         } else {
             None
         };
+        // The portal comes first: if it refuses, the clipboard stays untouched.
+        let (remote, _clipboard, session) = self.open().await?;
         // With the setting on, clipboard managers should not keep the dictation,
         // as on macOS.
-        let replaced = data_control::offer_text(text, preserve_clipboard)
-            .await
-            .map_err(InsertError::Clipboard)?;
-        let (remote, _clipboard, session) = self.open().await?;
+        let replaced = match data_control::offer_text(text, preserve_clipboard).await {
+            Ok(replaced) => replaced,
+            Err(error) => {
+                let _ = session.close().await;
+                return Err(InsertError::Clipboard(error));
+            }
+        };
         let pressed = async {
             press_ctrl_v(&remote, &session).await?;
             Timer::after(PASTE_GRACE).await;
@@ -189,21 +194,24 @@ impl TextInserter {
         }
         .await;
         let _ = session.close().await;
-        pressed?;
-        // Another app copied something meanwhile: its content stays.
+        // The previous content comes back even when the keys failed. If another
+        // app copied something meanwhile, its content stays.
+        let mut restored = Ok(());
         if preserve_clipboard && !replaced.load(std::sync::atomic::Ordering::Acquire) {
             match saved {
                 Some(saved) if saved.is_empty() => data_control::clear().await,
                 Some(saved) => {
-                    data_control::offer_snapshot(saved)
+                    restored = data_control::offer_snapshot(saved)
                         .await
-                        .map_err(InsertError::Clipboard)?;
+                        .map(|_| ())
+                        .map_err(InsertError::Clipboard);
                 }
                 // Not readable in full: the dictated text stays.
                 None => {}
             }
         }
-        Ok(())
+        pressed?;
+        restored
     }
 
     async fn open(
@@ -267,34 +275,43 @@ impl TextInserter {
     }
 }
 
-/// Reads every type the clipboard offers, unless the clipboard is empty, too
-/// large or slow to answer. An empty snapshot means nothing will be restored.
+/// Reads every type the clipboard offers. `None` when the content cannot be
+/// read in full or is too large; then nothing is restored.
+///
+/// GNOME reports no owner for an empty clipboard. An empty clipboard comes back
+/// as empty text, because an empty selection does not clear it there.
 async fn snapshot(
     clipboard: &Clipboard,
     session: &Session<RemoteDesktop>,
     mut owners: std::pin::Pin<
         &mut impl Stream<Item = (Session<RemoteDesktop>, SelectionOwnerChanged)>,
     >,
-) -> Snapshot {
+) -> Option<Snapshot> {
+    let empty = || {
+        MIME_TYPES
+            .iter()
+            .map(|mime| ((*mime).to_owned(), Vec::new()))
+            .collect()
+    };
     let first = future::select(owners.next(), Timer::after(OWNER_WAIT)).await;
     let future::Either::Left((Some((_, owner)), _)) = first else {
-        return Snapshot::new();
+        return Some(empty());
     };
     if owner.session_is_owner() == Some(true) {
-        return Snapshot::new();
+        return None;
+    }
+    if owner.mime_types().is_empty() {
+        return Some(empty());
     }
     let mut saved = Snapshot::new();
     let mut total = 0u64;
     for mime in owner.mime_types() {
-        let Some(bytes) = read_selection(clipboard, session, mime, SNAPSHOT_LIMIT - total).await
-        else {
-            // A type that cannot be read in full would come back damaged.
-            return Snapshot::new();
-        };
+        // A type that cannot be read in full would come back damaged.
+        let bytes = read_selection(clipboard, session, mime, SNAPSHOT_LIMIT - total).await?;
         total += bytes.len() as u64;
         saved.push((mime.clone(), bytes));
     }
-    saved
+    Some(saved)
 }
 
 /// Reads one clipboard type. `None` when it fails, times out or exceeds `limit`.
@@ -326,7 +343,7 @@ async fn paste(
     clipboard: &Clipboard,
     session: &Session<RemoteDesktop>,
     bytes: &[u8],
-    saved: &Snapshot,
+    saved: Option<&Snapshot>,
     owners: impl Stream<Item = (Session<RemoteDesktop>, SelectionOwnerChanged)>,
 ) -> Result<(), InsertError> {
     let mut transfers = std::pin::pin!(
@@ -352,7 +369,8 @@ async fn paste(
         while let Some((_, mime, serial)) = transfers.next().await {
             let data = if restoring.get() {
                 saved
-                    .iter()
+                    .into_iter()
+                    .flatten()
                     .find(|(saved_mime, _)| *saved_mime == mime)
                     .map(|(_, data)| data.as_slice())
             } else {
@@ -379,7 +397,9 @@ async fn paste(
     let press = async {
         press_ctrl_v(remote, session).await?;
         Timer::after(PASTE_GRACE).await;
-        if !saved.is_empty() && !taken_by_another_app(owners) {
+        if let Some(saved) = saved
+            && !taken_by_another_app(owners)
+        {
             restore(clipboard, session, saved, &restoring, &restored).await?;
         }
         Ok::<(), InsertError>(())
