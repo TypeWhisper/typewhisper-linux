@@ -25,15 +25,17 @@
   },
   "build-options": {
     "append-path": "/usr/lib/sdk/rust-stable/bin",
-    "build-args": ["--share=network"],
-    "env": { "CARGO_HOME": "/run/build/typewhisper/cargo" }
+    "env": {
+      "CARGO_HOME": "/run/build/typewhisper/cargo",
+      "CARGO_NET_OFFLINE": "true"
+    }
   },
   "modules": [
     {
       "name": "typewhisper",
       "buildsystem": "simple",
       "build-commands": [
-        "cargo build --release --locked -p typewhisper",
+        "cargo build --release --locked --offline -p typewhisper",
         "install -Dm755 target/release/typewhisper /app/bin/typewhisper",
         "install -d /app/plugins",
         "install -Dm644 packaging/com.typewhisper.TypeWhisper.desktop /app/share/applications/com.typewhisper.TypeWhisper.desktop",
@@ -41,7 +43,8 @@
         "install -Dm644 packaging/com.typewhisper.TypeWhisper.metainfo.xml /app/share/metainfo/com.typewhisper.TypeWhisper.metainfo.xml"
       ],
       "sources": [
-        { "type": "dir", "path": "../..", "skip": ["target", ".flatpak-builder", "build-dir", "repo", ".git"] }
+        { "type": "dir", "path": "../..", "skip": ["target", ".flatpak-builder", "build-dir", "repo", ".git"] },
+        "cargo-sources.json"
       ]
     }
   ]

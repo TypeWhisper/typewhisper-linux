@@ -25,4 +25,8 @@ uses and drive the session for tests:
 `dev/install-dev.sh` installs a development build for the current user: a `.desktop`
 file pointing at the build, which the portals need, and the Parakeet plugin.
 
+`flatpak/update-cargo-sources.sh` writes `packaging/flatpak/cargo-sources.json` from
+`Cargo.lock` with `flatpak-cargo-generator.py`, so the Flatpak builds get every crate
+without network access. `--check` fails if the file does not match the lockfile.
+
 Results of the first run are in [docs/spike-2026-11.md](../docs/spike-2026-11.md).
