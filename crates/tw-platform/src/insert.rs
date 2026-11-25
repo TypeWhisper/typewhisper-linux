@@ -32,6 +32,8 @@ use ashpd::desktop::remote_desktop::{
 use ashpd::desktop::{CreateSessionOptions, PersistMode, Session};
 use ashpd::zbus;
 use async_io::Timer;
+
+use crate::i18n::{n_, tr, tr_with};
 use futures_util::{AsyncReadExt, FutureExt, Stream, StreamExt, future, pin_mut};
 
 const KEYSYM_CONTROL_L: i32 = 0xffe3;
@@ -87,15 +89,18 @@ pub enum InsertError {
 impl std::fmt::Display for InsertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InsertError::NotAllowed(what) => write!(f, "{what}"),
-            InsertError::Clipboard(error) => write!(f, "The clipboard could not be set: {error}"),
-            InsertError::NotDelivered => {
-                write!(
-                    f,
-                    "The text did not reach the clipboard, so nothing was pasted."
-                )
-            }
-            InsertError::Portal(error) => write!(f, "The desktop refused the insertion: {error}"),
+            InsertError::NotAllowed(what) => f.write_str(&tr(what)),
+            InsertError::Clipboard(error) => f.write_str(&tr_with(
+                "The clipboard could not be set: {error}",
+                &[("error", error)],
+            )),
+            InsertError::NotDelivered => f.write_str(&tr(
+                "The text did not reach the clipboard, so nothing was pasted.",
+            )),
+            InsertError::Portal(error) => f.write_str(&tr_with(
+                "The desktop refused the insertion: {error}",
+                &[("error", &error.to_string())],
+            )),
         }
     }
 }
@@ -276,11 +281,13 @@ impl TextInserter {
             .await?
             .response()?;
         let refusal = if !selected.devices().contains(DeviceType::KEYBOARD) {
-            Some("TypeWhisper may not type. Allow remote interaction in the desktop's dialog.")
+            Some(n_(
+                "TypeWhisper may not type. Allow remote interaction in the desktop's dialog.",
+            ))
         } else if !selected.is_clipboard_enabled() {
-            Some(
+            Some(n_(
                 "TypeWhisper may not use the clipboard. Allow clipboard access in the desktop's dialog.",
-            )
+            ))
         } else {
             None
         };

@@ -34,7 +34,7 @@ jobs:
       - name: Install the validators
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends appstream desktop-file-utils shellcheck
+          sudo apt-get install -y --no-install-recommends appstream desktop-file-utils gettext shellcheck
 
       - name: Lint the shell scripts
         run: git ls-files -z '*.sh' | xargs -0 shellcheck
@@ -45,6 +45,15 @@ jobs:
 
       - name: Test the CI scripts
         run: python3 -m unittest discover -s tools/ci -p 'test_*.py'
+
+      - name: Test the translation tools
+        run: python3 -m unittest discover -s tools/i18n -p 'test_*.py'
+
+      - name: Check the translations
+        # Every text the app passes to tr(), tr_with() or n_() needs a translation in each catalog.
+        run: |
+          tools/i18n/update-translations.py --check
+          tools/i18n/build-catalogs.sh "$RUNNER_TEMP/locale"
 
       - name: Check the Flatpak cargo sources against Cargo.lock
         # The Flatpak builds have no network access and take every crate from this file.

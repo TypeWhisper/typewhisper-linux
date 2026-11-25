@@ -4,6 +4,7 @@
 # - a .desktop file whose Exec points at the build, and the icon. The portals
 #   accept the app ID only when a matching .desktop file names a program that exists.
 # - the Parakeet plugin package in the user plugin folder.
+# - the translations in <target-dir>/share/locale, where the build looks for them.
 #
 #   tools/dev/install-dev.sh [target-dir]   (default: target, release profile)
 set -euo pipefail
@@ -16,6 +17,7 @@ target_dir="$(cd "$target_dir" && pwd)"
 target="$target_dir/release"
 cargo build --release --locked --target-dir "$target_dir" \
   -p typewhisper -p tw-plugin-parakeet --manifest-path "$repo/Cargo.toml"
+"$repo/tools/i18n/build-catalogs.sh" "$target_dir/share/locale"
 
 # Quotes a path as one argument of an Exec key: the quoting rule escapes
 # " ` $ and \, the string rule then doubles every backslash, and % becomes %%.

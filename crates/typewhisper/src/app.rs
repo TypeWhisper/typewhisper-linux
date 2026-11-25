@@ -12,6 +12,7 @@ use gtk::{gio, glib};
 use serde_json::{Value, json};
 use tw_platform::accessibility::{Focus, FocusedField};
 use tw_platform::audio::{Recorder, SAMPLE_RATE};
+use tw_platform::i18n::{n_, tr, tr_with};
 use tw_platform::insert::{PasteKeys, TextInserter};
 use tw_platform::settings::{self, Settings};
 use tw_platform::shortcuts::{self, BoundShortcut, Command, PressInterpreter};
@@ -26,13 +27,13 @@ use crate::shell_bridge::ShellBridge;
 use crate::terminals::{self, TerminalApps};
 
 const PARAKEET: &str = "com.typewhisper.parakeet";
-const SHORTCUT_DESCRIPTION: &str = "Start and stop dictation";
+const SHORTCUT_DESCRIPTION: &str = n_("Start and stop dictation");
 /// Shorter recordings are treated as accidental presses.
 const MIN_SAMPLES: usize = SAMPLE_RATE as usize / 4;
 
 /// The model the Parakeet plugin ships.
 const MODEL_NAME: &str = "NVIDIA Parakeet TDT 0.6B v3";
-const MODEL_SUMMARY: &str = "Runs offline with no API key.";
+const MODEL_SUMMARY: &str = n_("Runs offline with no API key.");
 /// How long the indicator keeps the result of a dictation on screen.
 const INSERTED_FEEDBACK: Duration = Duration::from_millis(900);
 const ERROR_FEEDBACK: Duration = Duration::from_secs(3);
@@ -222,7 +223,10 @@ pub fn startup(application: &adw::Application) {
                     .borrow_mut()
                     .set_strings(settings::TERMINAL_APPS, app_ids);
                 if let Err(error) = saved {
-                    app.toast(&format!("The setting could not be saved: {error}"));
+                    app.toast(&tr_with(
+                        "The setting could not be saved: {error}",
+                        &[("error", &error.to_string())],
+                    ));
                 }
             }
         ),
@@ -273,7 +277,10 @@ fn bind_setting(app: &Rc<App>, row: &adw::SwitchRow, key: &'static str, default:
         move |row| {
             let saved = app.settings.borrow_mut().set_bool(key, row.is_active());
             if let Err(error) = saved {
-                app.toast(&format!("The setting could not be saved: {error}"));
+                app.toast(&tr_with(
+                    "The setting could not be saved: {error}",
+                    &[("error", &error.to_string())],
+                ));
             }
         }
     ));
@@ -372,26 +379,30 @@ fn build_ui(application: &adw::Application) -> Ui {
     let status = adw::PreferencesGroup::new();
     status.add(&hero_card);
 
-    let typing_row = row("Keyboard and Clipboard Access", "", "edit-paste-symbolic");
-    let typing_button = button("Grant Access");
-    let typing_granted = granted("Granted");
+    let typing_row = row(
+        &tr("Keyboard and Clipboard Access"),
+        "",
+        "edit-paste-symbolic",
+    );
+    let typing_button = button(&tr("Grant Access"));
+    let typing_granted = granted(&tr("Granted"));
     typing_row.add_suffix(&typing_button);
     typing_row.add_suffix(&typing_granted);
     let permissions = adw::PreferencesGroup::builder()
-        .title("Permissions")
+        .title(tr("Permissions"))
         .build();
     permissions.add(&typing_row);
 
-    let shortcut_row = row("Dictation Hotkey", "", "input-keyboard-symbolic");
+    let shortcut_row = row(&tr("Dictation Hotkey"), "", "input-keyboard-symbolic");
     let shortcut_key = keycap();
-    let shortcut_button = button("Set Up");
+    let shortcut_button = button(&tr("Set Up"));
     shortcut_row.add_suffix(&shortcut_key);
     shortcut_row.add_suffix(&shortcut_button);
-    let hotkey = adw::PreferencesGroup::builder().title("Hotkey").build();
+    let hotkey = adw::PreferencesGroup::builder().title(tr("Hotkey")).build();
     hotkey.add(&shortcut_row);
 
     let model_row = row(MODEL_NAME, "", "audio-input-microphone-symbolic");
-    let model_button = button("Download");
+    let model_button = button(&tr("Download"));
     let model_progress_bar = gtk::ProgressBar::builder()
         .valign(gtk::Align::Center)
         .width_request(96)
@@ -409,14 +420,14 @@ fn build_ui(application: &adw::Application) -> Ui {
     model_progress.append(&model_progress_label);
     let model_spinner = adw::Spinner::builder()
         .valign(gtk::Align::Center)
-        .tooltip_text("Loading")
+        .tooltip_text(tr("Loading"))
         .build();
-    let model_ready = granted("Ready");
+    let model_ready = granted(&tr("Ready"));
     model_row.add_suffix(&model_button);
     model_row.add_suffix(&model_progress);
     model_row.add_suffix(&model_spinner);
     model_row.add_suffix(&model_ready);
-    let engine = adw::PreferencesGroup::builder().title("Engine").build();
+    let engine = adw::PreferencesGroup::builder().title(tr("Engine")).build();
     engine.add(&model_row);
 
     let last_row = adw::ActionRow::builder()
@@ -425,7 +436,7 @@ fn build_ui(application: &adw::Application) -> Ui {
         .title_selectable(true)
         .build();
     let last_group = adw::PreferencesGroup::builder()
-        .title("Last Transcription")
+        .title(tr("Last Transcription"))
         .visible(false)
         .build();
     last_group.add(&last_row);
@@ -439,35 +450,43 @@ fn build_ui(application: &adw::Application) -> Ui {
         row
     };
     let preserve_clipboard = switch_row(
-        "Preserve clipboard content",
-        "Restores your clipboard after text insertion. Without this, your clipboard \
-         contains the transcribed text after dictation.",
+        &tr("Preserve clipboard content"),
+        &tr(
+            "Restores your clipboard after text insertion. Without this, your clipboard \
+             contains the transcribed text after dictation.",
+        ),
         "edit-copy-symbolic",
     );
-    let clipboard = adw::PreferencesGroup::builder().title("Clipboard").build();
+    let clipboard = adw::PreferencesGroup::builder()
+        .title(tr("Clipboard"))
+        .build();
     clipboard.add(&preserve_clipboard);
 
     // Filled once the settings are loaded, see `TerminalApps`.
     let terminal_apps = adw::PreferencesGroup::builder()
-        .title("Terminal Apps")
-        .description(terminals::DESCRIPTION)
+        .title(tr("Terminal Apps"))
+        .description(tr(terminals::DESCRIPTION))
         .build();
 
     let app_formatting = switch_row(
-        "App-aware formatting",
-        "When enabled, TypeWhisper uses target-app rules and available cursor context \
-         for smarter insertion.",
+        &tr("App-aware formatting"),
+        &tr(
+            "When enabled, TypeWhisper uses target-app rules and available cursor context \
+             for smarter insertion.",
+        ),
         "insert-text-symbolic",
     );
     let standalone_value_period = switch_row(
-        "Strip final period from standalone values",
-        "Removes a model-added period when a dictated email address, URL, number, or \
+        &tr("Strip final period from standalone values"),
+        &tr(
+            "Removes a model-added period when a dictated email address, URL, number, or \
          version string is inserted on its own, keeping the value usable in form fields. \
          Abbreviations, dates, and sentences are left alone.",
+        ),
         "format-text-plaintext-symbolic",
     );
     let formatting = adw::PreferencesGroup::builder()
-        .title("Output Formatting")
+        .title(tr("Output Formatting"))
         .build();
     formatting.add(&app_formatting);
     formatting.add(&standalone_value_period);
@@ -485,12 +504,12 @@ fn build_ui(application: &adw::Application) -> Ui {
     toasts.set_child(Some(&page));
 
     let menu = gio::Menu::new();
-    menu.append(Some("Quit"), Some("app.quit"));
+    menu.append(Some(&tr("Quit")), Some("app.quit"));
     let header = adw::HeaderBar::new();
     header.pack_end(
         &gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
-            .tooltip_text("Main Menu")
+            .tooltip_text(tr("Main Menu"))
             .primary(true)
             .menu_model(&menu)
             .build(),
@@ -539,28 +558,28 @@ fn build_ui(application: &adw::Application) -> Ui {
     }
 }
 
-/// What the status card shows.
-struct Hero<'a> {
+/// What the status card shows, translated.
+struct Hero {
     /// `None` shows a spinner instead.
-    icon: Option<&'a str>,
+    icon: Option<&'static str>,
     /// Style class of the icon: `accent`, `error`, `warning` or `dim-label`.
-    tone: &'a str,
-    title: &'a str,
-    text: &'a str,
+    tone: &'static str,
+    title: String,
+    text: String,
     /// A key shown after `text`, followed by `text_after`.
-    key: &'a str,
-    text_after: &'a str,
+    key: String,
+    text_after: String,
 }
 
-impl<'a> Hero<'a> {
-    fn new(icon: Option<&'a str>, tone: &'a str, title: &'a str, text: &'a str) -> Self {
+impl Hero {
+    fn new(icon: Option<&'static str>, tone: &'static str, title: String, text: String) -> Self {
         Self {
             icon,
             tone,
             title,
             text,
-            key: "",
-            text_after: "",
+            key: String::new(),
+            text_after: String::new(),
         }
     }
 }
@@ -651,10 +670,10 @@ impl App {
 
     fn refresh_typing_row(&self) {
         let approved = self.typing_approved();
-        self.ui.typing_row.set_subtitle(if approved {
-            "Pastes text into other apps."
+        self.ui.typing_row.set_subtitle(&if approved {
+            tr("Pastes text into other apps.")
         } else {
-            "Pastes text into other apps. In the desktop's dialog, switch on remote interaction and clipboard access."
+            tr("Pastes text into other apps. In the desktop's dialog, switch on remote interaction and clipboard access.")
         });
         self.ui.typing_button.set_visible(!approved);
         self.ui.typing_granted.set_visible(approved);
@@ -676,11 +695,11 @@ impl App {
         ui.shortcut_button.set_visible(trigger.is_none());
         ui.shortcut_row
             .set_subtitle(&match (error, trigger.as_deref()) {
-                (Some(error), _) => format!("Not set: {error}"),
+                (Some(error), _) => tr_with("Not set: {error}", &[("error", error)]),
                 (None, Some("")) => {
-                    "No key assigned. Assign one in the desktop's keyboard settings.".to_owned()
+                    tr("No key assigned. Assign one in the desktop's keyboard settings.")
                 }
-                _ => "Short press to toggle, hold to push-to-talk.".to_owned(),
+                _ => tr("Short press to toggle, hold to push-to-talk."),
             });
         self.refresh_hero();
     }
@@ -694,26 +713,28 @@ impl App {
         let model = self.state.borrow().model.clone();
         let ui = &self.ui;
         let subtitle = match &model {
-            ModelState::Searching => "Looking for the Parakeet plugin…".to_owned(),
+            ModelState::Searching => tr("Looking for the Parakeet plugin…"),
             ModelState::Unavailable(error) | ModelState::Failed(error) => error.clone(),
-            ModelState::Lost => "The speech model stopped unexpectedly.".to_owned(),
-            ModelState::NotDownloaded => {
-                format!("{MODEL_SUMMARY} Connect to the internet to download it (465 MB).")
-            }
-            ModelState::Downloading(Some(_)) => "Downloading…".to_owned(),
-            ModelState::Downloading(None) => "Unpacking…".to_owned(),
-            ModelState::Loading => "Loading model…".to_owned(),
-            ModelState::Ready => MODEL_SUMMARY.to_owned(),
+            ModelState::Lost => tr("The speech model stopped unexpectedly."),
+            ModelState::NotDownloaded => format!(
+                "{} {}",
+                tr(MODEL_SUMMARY),
+                tr("Connect to the internet to download it (465 MB).")
+            ),
+            ModelState::Downloading(Some(_)) => tr("Downloading…"),
+            ModelState::Downloading(None) => tr("Unpacking…"),
+            ModelState::Loading => tr("Loading model…"),
+            ModelState::Ready => tr(MODEL_SUMMARY),
         };
         ui.model_row.set_subtitle(&subtitle);
         ui.model_button.set_visible(matches!(
             model,
             ModelState::NotDownloaded | ModelState::Failed(_) | ModelState::Lost
         ));
-        ui.model_button.set_label(if model == ModelState::Lost {
-            "Restart"
+        ui.model_button.set_label(&if model == ModelState::Lost {
+            tr("Restart")
         } else {
-            "Download"
+            tr("Download")
         });
         ui.model_button.set_sensitive(true);
         if let ModelState::Downloading(Some(fraction)) = model {
@@ -755,63 +776,77 @@ impl App {
             Hero::new(
                 Some("dialog-error-symbolic"),
                 "error",
-                "No connection to the desktop",
-                error,
+                tr("No connection to the desktop"),
+                error.to_owned(),
             )
         } else if state.phase == Phase::Recording {
-            Hero::new(Some("media-record-symbolic"), "error", "Recording", "")
+            Hero::new(
+                Some("media-record-symbolic"),
+                "error",
+                tr("Recording"),
+                String::new(),
+            )
         } else if state.phase == Phase::Transcribing {
-            Hero::new(None, "", "Transcribing…", "")
+            Hero::new(None, "", tr("Transcribing…"), String::new())
         } else if state.starting {
-            Hero::new(None, "", "Starting…", "")
+            Hero::new(None, "", tr("Starting…"), String::new())
         } else if !approved {
             Hero::new(
                 Some("edit-paste-symbolic"),
                 "dim-label",
-                "Needs Access",
-                "Access is still needed before text can be pasted into other apps.",
+                tr("Needs Access"),
+                tr("Access is still needed before text can be pasted into other apps."),
             )
         } else if key.is_none_or(str::is_empty) {
             Hero::new(
                 Some("input-keyboard-symbolic"),
                 "dim-label",
-                "No hotkey",
-                "A hotkey still needs to be set before dictation can start.",
+                tr("No hotkey"),
+                tr("A hotkey still needs to be set before dictation can start."),
             )
         } else {
             match &state.model {
                 ModelState::Searching | ModelState::Loading => {
-                    Hero::new(None, "", "Loading model…", "")
+                    Hero::new(None, "", tr("Loading model…"), String::new())
                 }
-                ModelState::Downloading(_) => Hero::new(None, "", "Downloading model…", ""),
+                ModelState::Downloading(_) => {
+                    Hero::new(None, "", tr("Downloading model…"), String::new())
+                }
                 ModelState::NotDownloaded => Hero::new(
                     Some("folder-download-symbolic"),
                     "dim-label",
-                    "No model loaded",
-                    "A speech model still needs to be downloaded before dictation can run.",
+                    tr("No model loaded"),
+                    tr("A speech model still needs to be downloaded before dictation can run."),
                 ),
                 ModelState::Unavailable(error) | ModelState::Failed(error) => Hero::new(
                     Some("dialog-warning-symbolic"),
                     "warning",
-                    "No model loaded",
-                    error,
+                    tr("No model loaded"),
+                    error.clone(),
                 ),
                 ModelState::Lost => Hero::new(
                     Some("dialog-warning-symbolic"),
                     "warning",
-                    "No model loaded",
-                    "The speech model stopped unexpectedly. Restart it below.",
+                    tr("No model loaded"),
+                    tr("The speech model stopped unexpectedly. Restart it below."),
                 ),
-                ModelState::Ready => Hero {
-                    key: key.unwrap_or_default(),
-                    text_after: "in any app to begin.",
-                    ..Hero::new(
-                        Some("audio-input-microphone-symbolic"),
-                        "accent",
-                        "Ready to start dictating?",
-                        "Press",
-                    )
-                },
+                ModelState::Ready => {
+                    // One text, so that a translation can put the key anywhere.
+                    let invitation = tr("Press {key} in any app to begin.");
+                    let (before, after) = invitation
+                        .split_once("{key}")
+                        .unwrap_or((invitation.as_str(), ""));
+                    Hero {
+                        key: key.unwrap_or_default().to_owned(),
+                        text_after: after.trim().to_owned(),
+                        ..Hero::new(
+                            Some("audio-input-microphone-symbolic"),
+                            "accent",
+                            tr("Ready to start dictating?"),
+                            before.trim().to_owned(),
+                        )
+                    }
+                }
             }
         };
 
@@ -822,11 +857,11 @@ impl App {
             ui.hero_icon.set_icon_name(Some(icon));
             ui.hero_icon.set_css_classes(&[hero.tone]);
         }
-        ui.hero_title.set_label(hero.title);
+        ui.hero_title.set_label(&hero.title);
         for (label, text) in [
-            (&ui.hero_text, hero.text),
-            (&ui.hero_key, hero.key),
-            (&ui.hero_text_after, hero.text_after),
+            (&ui.hero_text, &hero.text),
+            (&ui.hero_key, &hero.key),
+            (&ui.hero_text_after, &hero.text_after),
         ] {
             label.set_label(text);
             label.set_visible(!text.is_empty());
@@ -888,7 +923,7 @@ async fn bind_shortcut(app: Rc<App>) {
         return;
     };
     app.ui.shortcut_button.set_sensitive(false);
-    match shortcuts::bind(&connection, SHORTCUT_DESCRIPTION).await {
+    match shortcuts::bind(&connection, &tr(SHORTCUT_DESCRIPTION)).await {
         Ok((bound, mut events)) => {
             if let Some(flag) = shortcut_flag() {
                 let _ = std::fs::write(flag, "");
@@ -933,11 +968,14 @@ async fn approve_typing(app: Rc<App>) {
 
 type PluginStart = Result<(PluginProcess, bool), String>;
 
-fn missing_plugin() -> &'static str {
+fn missing_plugin() -> String {
     if std::env::var_os("FLATPAK_ID").is_some() {
-        "The Parakeet add-on is not installed. Install com.typewhisper.TypeWhisper.Plugin.Parakeet."
+        tr_with(
+            "The Parakeet add-on is not installed. Install {add_on}.",
+            &[("add_on", "com.typewhisper.TypeWhisper.Plugin.Parakeet")],
+        )
     } else {
-        "The Parakeet plugin is not installed."
+        tr("The Parakeet plugin is not installed.")
     }
 }
 
@@ -958,7 +996,7 @@ async fn start_plugin(app: Rc<App>) {
         Ok((process, installed))
     })
     .await
-    .unwrap_or_else(|_| Err("The plugin host crashed.".into()));
+    .unwrap_or_else(|_| Err(tr("The plugin host crashed.")));
 
     match started {
         Ok((process, installed)) => {
@@ -1054,12 +1092,12 @@ async fn download_model(app: Rc<App>) {
 fn start_recording(app: &Rc<App>) {
     let mut state = app.state.borrow_mut();
     let refusal = if state.busy {
-        Some("Still working on the last dictation.")
+        Some(tr("Still working on the last dictation."))
     } else {
         match state.model {
             ModelState::Ready => None,
-            ModelState::Searching | ModelState::Loading => Some("Loading model…"),
-            _ => Some("No model loaded"),
+            ModelState::Searching | ModelState::Loading => Some(tr("Loading model…")),
+            _ => Some(tr("No model loaded")),
         }
     };
     if let Some(text) = refusal {
@@ -1069,9 +1107,9 @@ fn start_recording(app: &Rc<App>) {
         if busy {
             // The indicator already shows the running dictation. Error feedback
             // would replace it and hide it before the text is inserted.
-            app.toast(text);
+            app.toast(&text);
         } else {
-            app.dictation_failed(text);
+            app.dictation_failed(&text);
         }
         return;
     }
@@ -1080,7 +1118,7 @@ fn start_recording(app: &Rc<App>) {
             state.recorder = Some(recorder);
             drop(state);
             app.set_phase(Phase::Recording);
-            app.indicator("recording", "Recording");
+            app.indicator("recording", &tr("Recording"));
         }
         Err(error) => {
             state.interpreter.reset();
@@ -1100,7 +1138,7 @@ fn stop_recording(app: Rc<App>) {
         (recorder, state.plugin.clone(), state.inserter.clone())
     };
     app.set_phase(Phase::Transcribing);
-    app.indicator("processing", "Transcribing…");
+    app.indicator("processing", &tr("Transcribing…"));
     glib::spawn_future_local(async move {
         let transcribed = gio::spawn_blocking(move || -> Result<String, CallError> {
             let samples = recorder.stop().map_err(CallError::Failed)?;
@@ -1108,7 +1146,7 @@ fn stop_recording(app: Rc<App>) {
                 return Ok(String::new());
             }
             let plugin =
-                plugin.ok_or(CallError::Failed("The speech model is not loaded.".into()))?;
+                plugin.ok_or_else(|| CallError::Failed(tr("The speech model is not loaded.")))?;
             let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
             let result = process.transcribe(&samples, None)?;
             Ok(result["text"].as_str().unwrap_or_default().to_owned())
@@ -1118,7 +1156,7 @@ fn stop_recording(app: Rc<App>) {
 
         // What the indicator ends on: `Ok` for inserted text, `Err` with the reason otherwise.
         let outcome = match transcribed {
-            Ok(text) if text.is_empty() => Err("No speech detected".to_owned()),
+            Ok(text) if text.is_empty() => Err(tr("No speech detected")),
             Ok(text) => {
                 app.ui.last_row.set_title(&text);
                 app.ui.last_row.set_subtitle("");
@@ -1171,7 +1209,7 @@ fn stop_recording(app: Rc<App>) {
                             Err(error) => Err(error.to_string()),
                         }
                     }
-                    None => Err("No connection to the desktop portals.".to_owned()),
+                    None => Err(tr("No connection to the desktop portals.")),
                 }
             }
             Err(CallError::Failed(error)) => Err(error),
@@ -1181,13 +1219,13 @@ fn stop_recording(app: Rc<App>) {
                 app.forget_plugin();
                 app.set_model(ModelState::Searching);
                 glib::spawn_future_local(start_plugin(Rc::clone(&app)));
-                Err("The speech model stopped. Starting it again…".to_owned())
+                Err(tr("The speech model stopped. Starting it again…"))
             }
         };
         app.state.borrow_mut().busy = false;
         app.set_phase(Phase::Idle);
         match outcome {
-            Ok(()) => app.indicator_feedback("inserting", "Inserted", INSERTED_FEEDBACK),
+            Ok(()) => app.indicator_feedback("inserting", &tr("Inserted"), INSERTED_FEEDBACK),
             Err(error) => app.dictation_failed(&error),
         }
     });
