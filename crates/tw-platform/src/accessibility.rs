@@ -224,17 +224,19 @@ async fn read_context(connection: &zbus::Connection, target: &Object) -> Option<
     if start < 0 || end > count {
         return None;
     }
+    // Only the text around the selection matters, so a large selection is not
+    // read: the two windows are joined, and the selection becomes the point
+    // between them.
     let from = (start - WINDOW).max(0);
     let to = end.saturating_add(WINDOW).min(count);
-    let value: String = call(connection, target, TEXT, "GetText", &(from, to))
-        .await
-        .ok()?;
-    window_context(
-        value,
-        (start - from) as usize..(end - from) as usize,
-        from > 0,
-        to < count,
+    let (before, after): (String, String) = future::try_join(
+        call(connection, target, TEXT, "GetText", &(from, start)),
+        call(connection, target, TEXT, "GetText", &(end, to)),
     )
+    .await
+    .ok()?;
+    let point = before.chars().count();
+    window_context(before + &after, point..point, from > 0, to < count)
 }
 
 /// Builds the context from text read around the selection. When the text
