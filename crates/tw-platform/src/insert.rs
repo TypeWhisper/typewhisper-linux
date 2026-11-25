@@ -52,8 +52,12 @@ const OWNER_WAIT: Duration = Duration::from_millis(300);
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 /// Clipboard content larger than this in total is not preserved.
 const SNAPSHOT_LIMIT: u64 = 32 * 1024 * 1024;
+/// How long a late owner report may take once a read showed the clipboard has content.
+const LATE_REPORT_WAIT: Duration = Duration::from_secs(1);
 /// Longest wait for the desktop to fetch the restored content.
 const RESTORE_WAIT: Duration = Duration::from_millis(500);
+/// The restore is done when no further type was fetched for this long.
+const RESTORE_QUIET: Duration = Duration::from_millis(150);
 
 /// The clipboard content before a paste, one entry per MIME type.
 type Snapshot = Vec<(String, Vec<u8>)>;
@@ -295,8 +299,25 @@ async fn snapshot(
             .collect()
     };
     let first = future::select(owners.next(), Timer::after(OWNER_WAIT)).await;
-    let future::Either::Left((Some((_, owner)), _)) = first else {
-        return snapshot_without_report(clipboard, session, empty).await;
+    let owner = match first {
+        future::Either::Left((Some((_, owner)), _)) => owner,
+        _ => {
+            // GNOME reports no owner for an empty clipboard and fails a read of
+            // it, while a filled clipboard answers. So a failed read means empty.
+            if clipboard
+                .selection_read(session, MIME_TYPES[0])
+                .await
+                .is_err()
+            {
+                return Some(empty());
+            }
+            // There is content, but only its report lists every type. Without
+            // it, a restore could drop formats, so nothing is restored.
+            match future::select(owners.next(), Timer::after(LATE_REPORT_WAIT)).await {
+                future::Either::Left((Some((_, owner)), _)) => owner,
+                _ => return None,
+            }
+        }
     };
     if owner.session_is_owner() == Some(true) {
         return None;
@@ -313,46 +334,6 @@ async fn snapshot(
         saved.push((mime.clone(), bytes));
     }
     Some(saved)
-}
-
-/// Types read when the portal did not report the clipboard's owner in time.
-const PROBE_TYPES: &[&str] = &[
-    "text/plain;charset=utf-8",
-    "text/plain",
-    "UTF8_STRING",
-    "text/html",
-    "text/uri-list",
-    "image/png",
-];
-
-/// No owner report arrived, which on GNOME means an empty clipboard, but a
-/// late report must not count as one. GNOME answers a read of an empty
-/// clipboard with an error, while a filled clipboard answers every type, with
-/// no data for types it does not hold. So an error means empty; otherwise the
-/// common types that hold data are kept, and content of none of them is left
-/// alone.
-async fn snapshot_without_report(
-    clipboard: &Clipboard,
-    session: &Session<RemoteDesktop>,
-    empty: impl FnOnce() -> Snapshot,
-) -> Option<Snapshot> {
-    if clipboard
-        .selection_read(session, PROBE_TYPES[0])
-        .await
-        .is_err()
-    {
-        return Some(empty());
-    }
-    let mut saved = Snapshot::new();
-    let mut total = 0u64;
-    for mime in PROBE_TYPES {
-        let bytes = read_selection(clipboard, session, mime, SNAPSHOT_LIMIT - total).await?;
-        if !bytes.is_empty() {
-            total += bytes.len() as u64;
-            saved.push(((*mime).to_owned(), bytes));
-        }
-    }
-    (!saved.is_empty()).then_some(saved)
 }
 
 /// Reads one clipboard type. `None` when it fails, times out or exceeds `limit`.
@@ -403,7 +384,7 @@ async fn paste(
     // pastes, so transfers are served while the keys are pressed.
     let delivered = std::cell::Cell::new(false);
     let restoring = std::cell::Cell::new(false);
-    let restored = std::cell::Cell::new(false);
+    let restored = Restored::default();
     let serve = async {
         // Portals send session signals only to the session's owner, and this
         // connection has no other remote desktop session open.
@@ -425,7 +406,7 @@ async fn paste(
             };
             if written {
                 if restoring.get() {
-                    restored.set(true);
+                    restored.served(mime);
                 } else {
                     delivered.set(true);
                 }
@@ -503,7 +484,7 @@ async fn restore(
     session: &Session<RemoteDesktop>,
     saved: &Snapshot,
     restoring: &std::cell::Cell<bool>,
-    restored: &std::cell::Cell<bool>,
+    restored: &Restored,
 ) -> Result<(), InsertError> {
     let mimes: Vec<&str> = saved.iter().map(|(mime, _)| mime.as_str()).collect();
     restoring.set(true);
@@ -514,10 +495,34 @@ async fn restore(
         )
         .await?;
     let started = std::time::Instant::now();
-    while !restored.get() && started.elapsed() < RESTORE_WAIT {
+    while !restored.done(mimes.len()) && started.elapsed() < RESTORE_WAIT {
         Timer::after(Duration::from_millis(20)).await;
     }
     Ok(())
+}
+
+/// Which restored types the desktop has fetched, and when it last fetched one.
+#[derive(Default)]
+struct Restored {
+    types: std::cell::RefCell<std::collections::HashSet<String>>,
+    last: std::cell::Cell<Option<std::time::Instant>>,
+}
+
+impl Restored {
+    fn served(&self, mime: String) {
+        self.types.borrow_mut().insert(mime);
+        self.last.set(Some(std::time::Instant::now()));
+    }
+
+    /// Every type was fetched, or some were and no further request followed.
+    /// GNOME's clipboard manager may fetch only one of them.
+    fn done(&self, offered: usize) -> bool {
+        self.types.borrow().len() >= offered
+            || self
+                .last
+                .get()
+                .is_some_and(|last| last.elapsed() >= RESTORE_QUIET)
+    }
 }
 
 fn write_private(path: &std::path::Path, contents: &str) {
