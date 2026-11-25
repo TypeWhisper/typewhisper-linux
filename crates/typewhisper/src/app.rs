@@ -754,6 +754,14 @@ async fn approve_typing(app: Rc<App>) {
 
 type PluginStart = Result<(PluginProcess, bool), String>;
 
+fn missing_plugin() -> &'static str {
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        "The Parakeet add-on is not installed. Install com.typewhisper.TypeWhisper.Plugin.Parakeet."
+    } else {
+        "The Parakeet plugin is not installed."
+    }
+}
+
 async fn start_plugin(app: Rc<App>) {
     app.set_model(ModelState::Searching);
     let started: PluginStart = gio::spawn_blocking(|| {
@@ -762,7 +770,7 @@ async fn start_plugin(app: Rc<App>) {
         let parakeet = plugins
             .iter()
             .find(|p| p.manifest.id == PARAKEET)
-            .ok_or("The Parakeet plugin is not installed.")?;
+            .ok_or_else(missing_plugin)?;
         let plugin_data = data.join("plugin-data").join(PARAKEET);
         let (process, info) =
             PluginProcess::start(parakeet, &plugin_data, env!("CARGO_PKG_VERSION"))

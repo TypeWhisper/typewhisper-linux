@@ -65,10 +65,14 @@ Flatpak:
 
 ```sh
 flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.typewhisper.TypeWhisper.json
+flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.typewhisper.TypeWhisper.Plugin.Parakeet.json
+flatpak run com.typewhisper.TypeWhisper
 ```
 
-The manifest lets cargo fetch crates during the build. A Flathub build will need
-vendored crates instead.
+The app defines the extension point `com.typewhisper.TypeWhisper.Plugin`, and each
+plugin is its own Flatpak mounted under `/app/plugins/<name>`. The second command
+builds Parakeet that way; it needs the app installed first. The manifests let cargo
+fetch crates during the build. A Flathub build will need vendored crates instead.
 
 ## Related
 
