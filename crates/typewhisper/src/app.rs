@@ -235,6 +235,32 @@ impl App {
         }
     }
 
+    /// The model is loaded and no dictation is running.
+    fn is_idle(&self) -> bool {
+        let state = self.state.borrow();
+        state.model_ready && state.recorder.is_none() && !state.busy
+    }
+
+    /// Drops a plugin process that died or no longer answers in order.
+    fn forget_plugin(&self) {
+        let mut state = self.state.borrow_mut();
+        state.plugin = None;
+        state.model_ready = false;
+    }
+
+    /// After the plugin died while setting up the model. A click on the button
+    /// starts it again; there is no automatic restart, so a model that crashes
+    /// the plugin on every load cannot cause a loop.
+    fn offer_restart(&self) {
+        self.forget_plugin();
+        let text = "The speech model stopped unexpectedly.";
+        self.ui.model_row.set_subtitle(text);
+        self.set_status(text);
+        self.ui.model_button.set_label("Restart");
+        self.ui.model_button.set_visible(true);
+        self.ui.model_button.set_sensitive(true);
+    }
+
     fn refresh_typing_row(&self) {
         let approved = self
             .state
@@ -335,7 +361,8 @@ async fn approve_typing(app: Rc<App>) {
     };
     app.ui.typing_button.set_sensitive(false);
     match inserter.approve().await {
-        Ok(()) if app.state.borrow().model_ready => app.set_status("Ready"),
+        // Keep "Listening…" or "Transcribing…" while a dictation runs.
+        Ok(()) if app.is_idle() => app.set_status("Ready"),
         Ok(()) => {}
         Err(error) => app.set_status(&error.to_string()),
     }
@@ -372,6 +399,7 @@ async fn start_plugin(app: Rc<App>) {
                 app.ui
                     .model_row
                     .set_subtitle("NVIDIA Parakeet TDT 0.6B v3, not downloaded (465 MB)");
+                app.ui.model_button.set_label("Download");
                 app.ui.model_button.set_sensitive(true);
                 app.set_status("Download the speech model to start.");
             }
@@ -387,13 +415,9 @@ fn call_plugin(
     plugin: &Arc<Mutex<PluginProcess>>,
     method: &str,
     params: Value,
-) -> Result<Value, String> {
-    let mut process = plugin
-        .lock()
-        .map_err(|_| "The plugin is unavailable.".to_string())?;
-    process
-        .call(method, params, &mut |_, _| {})
-        .map_err(|e| e.to_string())
+) -> Result<Value, CallError> {
+    let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
+    Ok(process.call(method, params, &mut |_, _| {})?)
 }
 
 async fn load_model(app: Rc<App>) {
@@ -407,7 +431,7 @@ async fn load_model(app: Rc<App>) {
         call_plugin(&plugin, "transcription.loadModel", json!({"threads": 4}))
     })
     .await
-    .unwrap_or_else(|_| Err("The plugin host crashed.".into()));
+    .unwrap_or(Err(CallError::Lost));
     match loaded {
         Ok(_) => {
             app.state.borrow_mut().model_ready = true;
@@ -417,15 +441,19 @@ async fn load_model(app: Rc<App>) {
             app.ui.model_button.set_visible(false);
             app.set_status("Ready");
         }
-        Err(error) => {
+        Err(CallError::Failed(error)) => {
             app.ui.model_row.set_subtitle(&error);
             app.ui.model_button.set_sensitive(true);
         }
+        Err(CallError::Lost) => app.offer_restart(),
     }
 }
 
 async fn download_model(app: Rc<App>) {
-    let Some(plugin) = app.state.borrow().plugin.clone() else {
+    let plugin = app.state.borrow().plugin.clone();
+    let Some(plugin) = plugin else {
+        // The process died earlier; the button now restarts it.
+        start_plugin(app).await;
         return;
     };
     app.ui.model_button.set_sensitive(false);
@@ -440,38 +468,35 @@ async fn download_model(app: Rc<App>) {
             }
         }
     ));
-    let result = gio::spawn_blocking(move || {
-        let mut process = plugin
-            .lock()
-            .map_err(|_| "The plugin is unavailable.".to_string())?;
-        process
-            .call(
-                "models.download",
-                json!({"force": true}),
-                &mut |method, params| {
-                    if method != "models.progress" {
-                        return;
-                    }
-                    let text = if params["unpacking"].as_bool() == Some(true) {
-                        "Unpacking…".to_owned()
-                    } else {
-                        let received = params["receivedBytes"].as_f64().unwrap_or(0.0);
-                        let total = params["totalBytes"].as_f64().unwrap_or(1.0).max(1.0);
-                        format!("Downloading {:.0} %", 100.0 * received / total)
-                    };
-                    let _ = progress_tx.send_blocking(text);
-                },
-            )
-            .map_err(|e| e.to_string())
+    let result = gio::spawn_blocking(move || -> Result<Value, CallError> {
+        let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
+        Ok(process.call(
+            "models.download",
+            json!({"force": true}),
+            &mut |method, params| {
+                if method != "models.progress" {
+                    return;
+                }
+                let text = if params["unpacking"].as_bool() == Some(true) {
+                    "Unpacking…".to_owned()
+                } else {
+                    let received = params["receivedBytes"].as_f64().unwrap_or(0.0);
+                    let total = params["totalBytes"].as_f64().unwrap_or(1.0).max(1.0);
+                    format!("Downloading {:.0} %", 100.0 * received / total)
+                };
+                let _ = progress_tx.send_blocking(text);
+            },
+        )?)
     })
     .await
-    .unwrap_or_else(|_| Err("The plugin host crashed.".into()));
+    .unwrap_or(Err(CallError::Lost));
     match result {
         Ok(_) => load_model(app).await,
-        Err(error) => {
+        Err(CallError::Failed(error)) => {
             app.ui.model_row.set_subtitle(&error);
             app.ui.model_button.set_sensitive(true);
         }
+        Err(CallError::Lost) => app.offer_restart(),
     }
 }
 
@@ -517,25 +542,19 @@ fn stop_recording(app: Rc<App>) {
     app.set_status("Transcribing…");
     app.indicator("processing", "Transcribing…");
     glib::spawn_future_local(async move {
-        let transcribed = gio::spawn_blocking(move || -> Result<String, TranscribeError> {
-            let samples = recorder.stop().map_err(TranscribeError::Failed)?;
+        let transcribed = gio::spawn_blocking(move || -> Result<String, CallError> {
+            let samples = recorder.stop().map_err(CallError::Failed)?;
             if samples.len() < MIN_SAMPLES {
                 return Ok(String::new());
             }
-            let plugin = plugin.ok_or(TranscribeError::Failed(
-                "The speech model is not loaded.".into(),
-            ))?;
-            let mut process = plugin.lock().map_err(|_| TranscribeError::PluginLost)?;
-            match process.transcribe(&samples, None) {
-                Ok(result) => Ok(result["text"].as_str().unwrap_or_default().to_owned()),
-                Err(PluginError::Io(_) | PluginError::Protocol(_)) => {
-                    Err(TranscribeError::PluginLost)
-                }
-                Err(error) => Err(TranscribeError::Failed(error.to_string())),
-            }
+            let plugin =
+                plugin.ok_or(CallError::Failed("The speech model is not loaded.".into()))?;
+            let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
+            let result = process.transcribe(&samples, None)?;
+            Ok(result["text"].as_str().unwrap_or_default().to_owned())
         })
         .await
-        .unwrap_or(Err(TranscribeError::PluginLost));
+        .unwrap_or(Err(CallError::Lost));
 
         match transcribed {
             Ok(text) if text.is_empty() => app.set_status("Nothing was heard."),
@@ -554,15 +573,11 @@ fn stop_recording(app: Rc<App>) {
                     None => app.set_status("No connection to the desktop portals."),
                 }
             }
-            Err(TranscribeError::Failed(error)) => app.set_status(&error),
-            Err(TranscribeError::PluginLost) => {
+            Err(CallError::Failed(error)) => app.set_status(&error),
+            Err(CallError::Lost) => {
                 // The process is gone or in an unknown state. Start a new one,
                 // which loads the model again.
-                {
-                    let mut state = app.state.borrow_mut();
-                    state.plugin = None;
-                    state.model_ready = false;
-                }
+                app.forget_plugin();
                 app.set_status("The speech model stopped. Starting it again…");
                 glib::spawn_future_local(start_plugin(Rc::clone(&app)));
             }
@@ -572,8 +587,18 @@ fn stop_recording(app: Rc<App>) {
     });
 }
 
-enum TranscribeError {
+enum CallError {
+    /// The plugin or the recording reported an error; the process is fine.
     Failed(String),
-    /// The plugin process died or no longer answers in order.
-    PluginLost,
+    /// The plugin process died, panicked a worker or no longer answers in order.
+    Lost,
+}
+
+impl From<PluginError> for CallError {
+    fn from(error: PluginError) -> Self {
+        match error {
+            PluginError::Io(_) | PluginError::Protocol(_) => CallError::Lost,
+            other => CallError::Failed(other.to_string()),
+        }
+    }
 }
