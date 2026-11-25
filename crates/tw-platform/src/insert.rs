@@ -1,7 +1,8 @@
 //! Inserting text into the focused app through the RemoteDesktop and Clipboard portals.
 //!
 //! The text goes on the clipboard through the Clipboard portal, then the portal's
-//! virtual keyboard presses Ctrl+V. Typing characters one by one is no option:
+//! virtual keyboard presses Ctrl+V, or Ctrl+Shift+V in a terminal, which passes
+//! Ctrl+V on to the program running in it. Typing characters one by one is no option:
 //! keysyms that the active layout lacks (umlauts on a US layout, emoji, CJK) are
 //! dropped by the compositor.
 //!
@@ -34,6 +35,7 @@ use async_io::Timer;
 use futures_util::{AsyncReadExt, FutureExt, Stream, StreamExt, future, pin_mut};
 
 const KEYSYM_CONTROL_L: i32 = 0xffe3;
+const KEYSYM_SHIFT_L: i32 = 0xffe1;
 const KEYSYM_V: i32 = 0x76;
 const MIME_TYPES: &[&str] = &[
     "text/plain;charset=utf-8",
@@ -61,6 +63,15 @@ const RESTORE_QUIET: Duration = Duration::from_millis(150);
 
 /// The clipboard content before a paste, one entry per MIME type.
 type Snapshot = Vec<(String, Vec<u8>)>;
+
+/// The keys that paste in the focused app.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PasteKeys {
+    #[default]
+    ControlV,
+    /// Terminals paste with these.
+    ControlShiftV,
+}
 
 #[derive(Debug)]
 pub enum InsertError {
@@ -120,12 +131,18 @@ impl TextInserter {
         Ok(())
     }
 
-    /// Pastes `text` into the focused app. With `preserve_clipboard`, the
-    /// clipboard holds its previous content again afterwards.
-    pub async fn insert(&self, text: &str, preserve_clipboard: bool) -> Result<(), InsertError> {
+    /// Pastes `text` into the focused app with `keys`. With
+    /// `preserve_clipboard`, the clipboard holds its previous content again
+    /// afterwards.
+    pub async fn insert(
+        &self,
+        text: &str,
+        preserve_clipboard: bool,
+        keys: PasteKeys,
+    ) -> Result<(), InsertError> {
         if crate::data_control::available().await {
             return self
-                .insert_with_data_control(text, preserve_clipboard)
+                .insert_with_data_control(text, preserve_clipboard, keys)
                 .await;
         }
         // Subscribed before the session starts, so the first report is not missed.
@@ -145,6 +162,7 @@ impl TextInserter {
                     &clipboard,
                     &session,
                     text.as_bytes(),
+                    keys,
                     saved.as_ref(),
                     owners,
                 )
@@ -156,6 +174,7 @@ impl TextInserter {
                     &clipboard,
                     &session,
                     text.as_bytes(),
+                    keys,
                     None,
                     futures_util::stream::pending(),
                 )
@@ -166,13 +185,14 @@ impl TextInserter {
         result
     }
 
-    /// Sets the clipboard through data-control, presses Ctrl+V through the
-    /// portal and, if asked, puts the previous content back. Without a served
-    /// transfer to count, a failed paste cannot be detected here.
+    /// Sets the clipboard through data-control, presses the paste keys through
+    /// the portal and, if asked, puts the previous content back. Without a
+    /// served transfer to count, a failed paste cannot be detected here.
     async fn insert_with_data_control(
         &self,
         text: &str,
         preserve_clipboard: bool,
+        keys: PasteKeys,
     ) -> Result<(), InsertError> {
         use crate::data_control;
         // The portal comes first: if it refuses, the clipboard stays untouched.
@@ -193,7 +213,7 @@ impl TextInserter {
             }
         };
         let pressed = async {
-            press_ctrl_v(&remote, &session).await?;
+            press(&remote, &session, keys).await?;
             Timer::after(PASTE_GRACE).await;
             Ok::<(), InsertError>(())
         }
@@ -365,6 +385,7 @@ async fn paste(
     clipboard: &Clipboard,
     session: &Session<RemoteDesktop>,
     bytes: &[u8],
+    keys: PasteKeys,
     saved: Option<&Snapshot>,
     owners: impl Stream<Item = (Session<RemoteDesktop>, SelectionOwnerChanged)>,
 ) -> Result<(), InsertError> {
@@ -417,7 +438,7 @@ async fn paste(
         }
     };
     let press = async {
-        press_ctrl_v(remote, session).await?;
+        press(remote, session, keys).await?;
         Timer::after(PASTE_GRACE).await;
         if let Some(saved) = saved
             && !taken_by_another_app(owners)
@@ -440,18 +461,15 @@ async fn paste(
     }
 }
 
-/// Presses Ctrl+V on the portal's virtual keyboard, with gaps between the keys.
-async fn press_ctrl_v(
+/// Presses the paste keys on the portal's virtual keyboard, with gaps between
+/// the keys.
+async fn press(
     remote: &RemoteDesktop,
     session: &Session<RemoteDesktop>,
+    keys: PasteKeys,
 ) -> Result<(), InsertError> {
     Timer::after(KEY_GAP * 2).await;
-    for (keysym, state) in [
-        (KEYSYM_CONTROL_L, KeyState::Pressed),
-        (KEYSYM_V, KeyState::Pressed),
-        (KEYSYM_V, KeyState::Released),
-        (KEYSYM_CONTROL_L, KeyState::Released),
-    ] {
+    for (keysym, state) in key_events(keys) {
         remote
             .notify_keyboard_keysym(
                 session,
@@ -463,6 +481,22 @@ async fn press_ctrl_v(
         Timer::after(KEY_GAP).await;
     }
     Ok(())
+}
+
+/// The modifiers go down first and come up last, in reverse order.
+fn key_events(keys: PasteKeys) -> Vec<(i32, KeyState)> {
+    let modifiers: &[i32] = match keys {
+        PasteKeys::ControlV => &[KEYSYM_CONTROL_L],
+        PasteKeys::ControlShiftV => &[KEYSYM_CONTROL_L, KEYSYM_SHIFT_L],
+    };
+    let down = modifiers.iter().map(|&key| (key, KeyState::Pressed));
+    let up = modifiers.iter().rev().map(|&key| (key, KeyState::Released));
+    down.chain([
+        (KEYSYM_V, KeyState::Pressed),
+        (KEYSYM_V, KeyState::Released),
+    ])
+    .chain(up)
+    .collect()
 }
 
 /// True when another app has taken the clipboard since the paste, as the
@@ -534,4 +568,34 @@ fn write_private(path: &std::path::Path, contents: &str) {
         .mode(0o600)
         .open(path)
         .and_then(|mut file| file.write_all(contents.as_bytes()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminals_get_shift_inside_control() {
+        use KeyState::{Pressed, Released};
+        assert_eq!(
+            key_events(PasteKeys::ControlV),
+            [
+                (KEYSYM_CONTROL_L, Pressed),
+                (KEYSYM_V, Pressed),
+                (KEYSYM_V, Released),
+                (KEYSYM_CONTROL_L, Released),
+            ]
+        );
+        assert_eq!(
+            key_events(PasteKeys::ControlShiftV),
+            [
+                (KEYSYM_CONTROL_L, Pressed),
+                (KEYSYM_SHIFT_L, Pressed),
+                (KEYSYM_V, Pressed),
+                (KEYSYM_V, Released),
+                (KEYSYM_SHIFT_L, Released),
+                (KEYSYM_CONTROL_L, Released),
+            ]
+        );
+    }
 }

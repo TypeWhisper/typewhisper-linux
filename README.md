@@ -9,14 +9,21 @@ runs on GNOME and KDE Plasma under Wayland and inside Flatpak.
 
 **Status: early development.** The app dictates: hold or tap a global shortcut,
 speak, and NVIDIA Parakeet transcribes on the CPU and pastes the text into the
-focused app. There are no settings, workflows or other engines yet. The groundwork
-comes from a [platform spike](docs/spike-2026-11.md) on GNOME 51 and Plasma 6.8.
+focused app. There are a few settings, but no workflows or other engines yet. The
+groundwork comes from a [platform spike](docs/spike-2026-11.md) on GNOME 51 and
+Plasma 6.8.
+
+Terminals get Ctrl+Shift+V instead of Ctrl+V. The app recognizes them through
+AT-SPI and through the app that the desktop reports as focused: the GNOME Shell
+extension reports it on GNOME, and on KDE Plasma the app loads a small KWin script
+while it runs. The Flatpak may not talk to KWin, so on KDE it recognizes only
+terminals that show up in AT-SPI.
 
 ## Layout
 
 | Path | Contents |
 | --- | --- |
-| `crates/typewhisper` | The GTK 4 and libadwaita app, and the indicator overlay on KDE Plasma and other compositors with wlr-layer-shell |
+| `crates/typewhisper` | The GTK 4 and libadwaita app, the indicator overlay on KDE Plasma and other compositors with wlr-layer-shell, and the KWin script that reports the focused app |
 | `crates/tw-platform` | Desktop services: microphone capture, global shortcut, pasting through the portals |
 | `crates/tw-formats` | Formats shared with the macOS, Windows and iOS apps, with conformance tests against fixtures written by the Mac app |
 | `crates/tw-plugin-protocol` | Wire protocol between the app and plugin processes |

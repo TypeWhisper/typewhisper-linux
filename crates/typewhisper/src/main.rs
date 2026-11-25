@@ -1,7 +1,9 @@
 mod app;
 mod formatting;
+mod kwin_script;
 mod overlay;
 mod shell_bridge;
+mod terminals;
 
 use adw::prelude::*;
 
