@@ -103,10 +103,15 @@ The builds have no network access, as on Flathub. flatpak-builder downloads ever
 source beforehand and checks its hash. Cargo takes the crates from
 `packaging/flatpak/cargo-sources.json`, so after every change to `Cargo.lock` run
 `tools/flatpak/update-cargo-sources.sh` and commit the result; CI fails while the
-file is out of date. The add-on builds sherpa-onnx and its C++ libraries from
-source. ONNX Runtime is still the prebuilt static library that sherpa-onnx links
-by default, so a Flathub submission of the add-on still needs ONNX Runtime built
-from source.
+file is out of date. The add-on builds ONNX Runtime, sherpa-onnx and their C++
+libraries from source. github.com/microsoft/onnxruntime returns 404, so the ONNX
+Runtime source comes from the matching release on
+[TypeWhisper/onnxruntime](https://github.com/TypeWhisper/onnxruntime), a
+`git archive` of the upstream release commit. Its CMake dependencies are sources
+under `mirror/`, where ONNX Runtime looks for local copies before it downloads
+anything; when ONNX Runtime changes version, take them from its `cmake/deps.txt`.
+The build joins ONNX Runtime's static libraries into one `libonnxruntime.a`, the
+library the sherpa-onnx crate links.
 
 ## Related
 
