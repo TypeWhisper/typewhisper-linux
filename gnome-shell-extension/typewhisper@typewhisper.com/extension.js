@@ -152,11 +152,10 @@ export default class TypeWhisperExtension extends Extension {
                 if (version !== PROTOCOL_VERSION)
                     return;
                 this._level = level;
-                // Without animations nothing moves between updates; each one redraws.
-                if (!this._frameId && this._waveform.visible) {
-                    this._advanceBars(false);
-                    this._waveform.queue_repaint();
-                }
+                // Without the frame timer, each update moves the bars; it also
+                // starts the timer when animations were switched back on.
+                if (!this._frameId && this._waveform.visible)
+                    this._tickBars();
             });
 
         this._focusId = global.display.connect('notify::focus-window', () => this._reportFocus());
@@ -260,14 +259,26 @@ export default class TypeWhisperExtension extends Extension {
     _startBars() {
         this._level = 0;
         this._bars = new BarModel();
-        this._advanceBars(St.Settings.get().enable_animations);
+        this._tickBars();
+    }
+
+    // Moves and redraws the bars. With animations on, a frame timer keeps them
+    // moving; it stops as soon as animations are switched off, and the bars
+    // then follow each level update directly.
+    _tickBars() {
+        const animate = St.Settings.get().enable_animations;
+        this._advanceBars(animate);
         this._waveform.queue_repaint();
-        if (!St.Settings.get().enable_animations)
+        if (!animate || this._frameId)
             return;
         this._frameId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, FRAME_MS, () => {
-            this._advanceBars(true);
+            const stillAnimated = St.Settings.get().enable_animations;
+            this._advanceBars(stillAnimated);
             this._waveform.queue_repaint();
-            return GLib.SOURCE_CONTINUE;
+            if (stillAnimated)
+                return GLib.SOURCE_CONTINUE;
+            this._frameId = 0;
+            return GLib.SOURCE_REMOVE;
         });
     }
 
