@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
+use libpulse_binding::def::BufferAttr;
 use libpulse_binding::sample::{Format, Spec};
 use libpulse_binding::stream::Direction;
 use libpulse_simple_binding::Simple;
@@ -12,12 +13,23 @@ use libpulse_simple_binding::Simple;
 /// Sample rate of every buffer TypeWhisper hands to a transcription engine.
 pub const SAMPLE_RATE: u32 = 16_000;
 const CHUNK_SAMPLES: usize = SAMPLE_RATE as usize / 10; // 100 ms
+/// Chunks read after `Recorder::stop`, for audio that was still on its way.
+const TAIL_CHUNKS: usize = 2;
 
 fn connect() -> Result<Simple, String> {
     let spec = Spec {
         format: Format::F32le,
         channels: 1,
         rate: SAMPLE_RATE,
+    };
+    // Without a fragment size, PipeWire delivers recorded audio in 2 s blocks, and
+    // whatever the server still holds when the recording stops is lost.
+    let attr = BufferAttr {
+        maxlength: u32::MAX,
+        tlength: u32::MAX,
+        prebuf: u32::MAX,
+        minreq: u32::MAX,
+        fragsize: (CHUNK_SAMPLES * 4) as u32,
     };
     Simple::new(
         None,
@@ -27,7 +39,7 @@ fn connect() -> Result<Simple, String> {
         "Dictation",
         &spec,
         None,
-        None,
+        Some(&attr),
     )
     .map_err(|e| format!("Could not open the microphone: {e}"))
 }
@@ -75,6 +87,9 @@ impl Recorder {
                 while flag.load(Ordering::Acquire) {
                     read_chunk(&simple, &mut bytes, &mut samples)?;
                 }
+                for _ in 0..TAIL_CHUNKS {
+                    read_chunk(&simple, &mut bytes, &mut samples)?;
+                }
                 Ok(samples)
             })
             .map_err(|e| format!("Could not start the recorder: {e}"))?;
@@ -84,7 +99,8 @@ impl Recorder {
         })
     }
 
-    /// Stops after the current 100 ms chunk and returns everything recorded.
+    /// Stops after the current 100 ms chunk plus a short tail and returns
+    /// everything recorded.
     pub fn stop(mut self) -> Result<Vec<f32>, String> {
         self.running.store(false, Ordering::Release);
         self.thread

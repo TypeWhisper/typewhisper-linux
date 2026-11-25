@@ -20,5 +20,9 @@ uses and drive the session for tests:
 | `atspi_tool.py`, `atspi_press.py` | Read the accessibility tree, press dialog buttons |
 | `mutter_keys.py`, `portal_keys.py` | Simulate keys on GNOME and through the portal |
 | `screenshot.py` | Screenshot through the Screenshot portal |
+| `feed_mic.py` | Play a WAV file into a virtual microphone in real time |
+
+`dev/install-dev.sh` installs a development build for the current user: a `.desktop`
+file pointing at the build, which the portals need, and the Parakeet plugin.
 
 Results of the first run are in [docs/spike-2026-11.md](../docs/spike-2026-11.md).

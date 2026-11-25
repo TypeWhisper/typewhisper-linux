@@ -1,7 +1,7 @@
 """Press named controls inside one window of one app via AT-SPI.
 
   atspi_press.py <app-name> <window-title-substring> <control-name>...
-Check boxes are switched on, buttons are pressed, in the given order."""
+Check boxes and switches are switched on, buttons are pressed, in the given order."""
 import sys
 import time
 
@@ -15,6 +15,13 @@ def walk(node):
     for child in node:
         if child is not None:
             yield from walk(child)
+
+
+def action_count(node):
+    try:
+        return node.queryAction().nActions
+    except NotImplementedError:
+        return 0
 
 
 def find_window():
@@ -36,11 +43,14 @@ if not win:
     sys.exit(f"window {window_part!r} of {app_name!r} not found")
 
 for name in controls:
-    target = next((n for n in walk(win) if n.name == name and n.getRoleName() in
-                   ("button", "push button", "check box", "toggle button")), None)
+    # libadwaita switch rows report the role "switch" for the row and for the
+    # switch inside it; the first one that offers an action is used.
+    candidates = [n for n in walk(win) if n.name == name and n.getRoleName() in
+                  ("button", "push button", "check box", "toggle button", "switch")]
+    target = next((n for n in candidates if action_count(n) > 0), None)
     if target is None:
         sys.exit(f"control {name!r} not found")
-    if target.getRoleName() == "check box" and target.getState().contains(pyatspi.STATE_CHECKED):
+    if target.getRoleName() in ("check box", "switch") and target.getState().contains(pyatspi.STATE_CHECKED):
         print(f"{name!r} already on")
         continue
     action = target.queryAction()

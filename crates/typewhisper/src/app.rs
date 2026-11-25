@@ -108,10 +108,13 @@ pub fn activate(application: &adw::Application) {
 }
 
 fn build_ui(application: &adw::Application) -> Ui {
+    // Subtitles show text from the desktop and from errors, for example
+    // "Press <Control><Alt>d", which is no valid markup.
     let row = |title: &str, subtitle: &str| {
         adw::ActionRow::builder()
             .title(title)
             .subtitle(subtitle)
+            .use_markup(false)
             .build()
     };
     let button = |label: &str| {
@@ -290,7 +293,7 @@ async fn bind_shortcut(app: Rc<App>) {
                 "Set up, but no key assigned. Assign one in the desktop's keyboard settings."
                     .to_owned()
             } else {
-                bound.trigger_description.clone()
+                shortcuts::readable_trigger(&bound.trigger_description)
             };
             app.ui.shortcut_row.set_subtitle(&trigger);
             app.ui.shortcut_button.set_visible(false);
