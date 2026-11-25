@@ -42,7 +42,7 @@
         "-Dintrospection=false",
         "-Dvapi=false"
       ],
-      "cleanup": ["/include", "/lib/pkgconfig"],
+      "cleanup": ["/include", "/lib/pkgconfig", "/lib/liblayer-shell-preload.so"],
       "sources": [
         {
           "type": "archive",
