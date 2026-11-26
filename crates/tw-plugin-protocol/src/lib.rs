@@ -20,6 +20,10 @@
 //! settings and the secrets in the desktop's keyring; the plugin keeps neither.
 //! Plugins without the capability never get the request.
 //!
+//! A plugin whose models depend on its settings, such as the server profiles of
+//! the OpenAI-compatible plugin, answers with a `models` list in the format of
+//! `initialize`, and the host uses it instead of the earlier one.
+//!
 //! # Errors
 //!
 //! A plugin may put [`ErrorData`] in the `data` member of a JSON-RPC error, so
@@ -84,6 +88,10 @@ impl std::fmt::Debug for PluginSettings {
 pub struct ErrorData {
     /// One of the names in [`error_kind`]; the host treats others as unknown.
     pub kind: String,
+    /// The service's own words, such as the message of an HTTP error, for the
+    /// host to show after its text. Never holds a secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// What went wrong, for errors the host explains in its own words.
@@ -106,6 +114,13 @@ pub mod error_kind {
     pub const INVALID_REQUEST: &str = "invalidRequest";
     /// The service failed (HTTP 5xx) or answered with something unreadable.
     pub const SERVER: &str = "server";
+    /// The service wants the API key, but the key goes only over HTTPS or to
+    /// this computer, so a plain-HTTP server on another computer got none.
+    pub const KEY_WITHHELD: &str = "keyWithheld";
+    /// A language model stopped its answer at its token limit.
+    pub const OUTPUT_TRUNCATED: &str = "outputTruncated";
+    /// A language model answered without any text.
+    pub const EMPTY_RESPONSE: &str = "emptyResponse";
 }
 
 /// Largest frame either side accepts. 16 MiB holds about 4 minutes of audio,

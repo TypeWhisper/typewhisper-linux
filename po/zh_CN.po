@@ -77,7 +77,7 @@ msgid "{model} (English)"
 msgstr "{model}（英语）"
 
 #. Leave {error} as it is.
-#: crates/typewhisper/src/app.rs
+#: crates/typewhisper/src/app.rs crates/typewhisper/src/server_profiles.rs
 msgid "The setting could not be saved: {error}"
 msgstr "无法保存设置：{error}"
 
@@ -183,6 +183,10 @@ msgid "Output Formatting"
 msgstr "输出格式化"
 
 #: crates/typewhisper/src/app.rs
+msgid "Servers with OpenAI's API, such as LM Studio, Ollama, vLLM or a cloud service. Each profile has its own URL, API key and models."
+msgstr "提供 OpenAI API 的服务器，例如 LM Studio、Ollama、vLLM 或云服务。每个配置文件都有自己的 URL、API 密钥和模型。"
+
+#: crates/typewhisper/src/app.rs
 msgid "About TypeWhisper"
 msgstr "关于 TypeWhisper"
 
@@ -243,6 +247,11 @@ msgstr "正在加载模型…"
 #: crates/typewhisper/src/app.rs
 msgid "Enter an API key below."
 msgstr "请在下方输入 API 密钥。"
+
+#. Leave {server} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "Sends recordings to {server}."
+msgstr "将录音发送到 {server}。"
 
 #: crates/typewhisper/src/app.rs
 msgid "Restart"
@@ -393,6 +402,11 @@ msgstr "此 {engine} 密钥没有执行该请求的权限。"
 msgid "{engine} rate limit reached. Wait and try again."
 msgstr "已达到 {engine} 速率限制。请稍候再试。"
 
+#. Leave {detail} and {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Could not reach {engine}: {detail}"
+msgstr "无法连接 {engine}：{detail}"
+
 #. Leave {engine} as it is.
 #: crates/typewhisper/src/cloud.rs
 msgid "Could not reach {engine}. Check your internet connection."
@@ -408,18 +422,351 @@ msgstr "{engine} 请求超时。请重试。"
 msgid "Recording exceeds {engine}'s upload limit. Use a shorter recording."
 msgstr "录音超出 {engine} 的上传限制。请使用较短的录音。"
 
+#. Leave {detail} and {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} could not complete the request: {detail}"
+msgstr "{engine} 无法完成请求：{detail}"
+
 #. Leave {engine} as it is.
 #: crates/typewhisper/src/cloud.rs
 msgid "{engine} could not complete the request. Check the selected model and try again."
 msgstr "{engine} 无法完成请求。请检查所选模型后重试。"
 
+#. Leave {engine} as it is.
 #: crates/typewhisper/src/cloud.rs
+msgid "{engine} requires the API key, but the key is sent only over HTTPS or to this computer. Use an HTTPS server URL."
+msgstr "{engine} 需要 API 密钥，但密钥仅通过 HTTPS 发送或发送到本机。请使用 HTTPS 服务器 URL。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} stopped its answer at its token limit."
+msgstr "{engine} 在达到令牌上限时中断了回答。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} answered without any text."
+msgstr "{engine} 的回答中没有任何文本。"
+
+#: crates/typewhisper/src/cloud.rs crates/typewhisper/src/server_profiles.rs
 msgid "API Key"
 msgstr "API 密钥"
 
-#: crates/typewhisper/src/cloud.rs
+#: crates/typewhisper/src/cloud.rs crates/typewhisper/src/server_profiles.rs
 msgid "Remove API key"
 msgstr "移除 API 密钥"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Custom Server"
+msgstr "自定义服务器"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Add Profile"
+msgstr "添加配置文件"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Not set up"
+msgstr "尚未设置"
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The API key could not be saved: {error}"
+msgstr "无法保存 API 密钥：{error}"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Models"
+msgstr "模型"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Profile Name"
+msgstr "配置文件名称"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Server URL"
+msgstr "服务器 URL"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Saved"
+msgstr "已保存"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "This server gets no API key: keys are sent only over HTTPS or to this computer."
+msgstr "此服务器不会收到 API 密钥：密钥仅通过 HTTPS 发送或发送到本机。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "API Version (optional)"
+msgstr "API 版本（可选）"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Test Connection"
+msgstr "测试连接"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Connection"
+msgstr "连接"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "For example http://localhost:1234 for LM Studio or http://localhost:11434 for Ollama; a trailing /v1 is optional. The API key is optional for local servers. It is sent only over HTTPS or to this computer."
+msgstr "例如 LM Studio 为 http://localhost:1234，Ollama 为 http://localhost:11434；末尾的 /v1 可省略。本地服务器可不填 API 密钥。密钥仅通过 HTTPS 发送或发送到本机。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Auto"
+msgstr "自动"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Transcription Model"
+msgstr "转录模型"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Transcription Transport"
+msgstr "转写传输方式"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Auto uses Realtime for gpt-live-transcribe and gpt-realtime-whisper, Batch for other models."
+msgstr "自动模式对 gpt-live-transcribe 和 gpt-realtime-whisper 使用实时，其他模型使用批量。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Batch"
+msgstr "批量"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Realtime"
+msgstr "实时"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Realtime Protocol"
+msgstr "实时协议"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "For a deployment alias, the model family behind it."
+msgstr "用于部署别名时，选择其背后的模型系列。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Batch Transcription Endpoint"
+msgstr "批量转录终结点"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Deployment-scoped needs a dated API version."
+msgstr "部署范围需要带日期的 API 版本。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Standard v1"
+msgstr "标准 v1"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Deployment-scoped"
+msgstr "部署范围"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Refresh Models"
+msgstr "刷新模型"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Transcription"
+msgstr "转录"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "When this profile is the engine, recorded audio is sent to this server for transcription."
+msgstr "当此配置文件用作引擎时，录制的音频会发送到此服务器进行转录。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Default"
+msgstr "提供商默认"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "LLM Model"
+msgstr "LLM 模型"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "LLM API"
+msgstr "LLM API"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Choose the API supported by your server."
+msgstr "选择你的服务器支持的 API。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Reasoning Effort"
+msgstr "推理强度"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Default omits reasoning. Other values send reasoning: { effort: ... } to /v1/responses."
+msgstr "提供商默认值不发送 reasoning。其他值会向 /v1/responses 发送 reasoning: { effort: ... }。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Low"
+msgstr "低"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Medium"
+msgstr "中"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "High"
+msgstr "高"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "X High"
+msgstr "超高"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Max"
+msgstr "最大"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Temperature"
+msgstr "温度"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Default sends no temperature override."
+msgstr "提供商默认值不会覆盖温度。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Custom"
+msgstr "自定义"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Temperature Value"
+msgstr "温度值"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "From 0 to 2. Lower values give more consistent results."
+msgstr "0 到 2。数值越低，结果越稳定。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Thinking Extension"
+msgstr "提供商 Thinking 扩展"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Uses reasoning_effort for DeepInfra and thinking.type for other compatible servers. Leave off unless your provider documents support."
+msgstr "对 DeepInfra 使用 reasoning_effort，对其他兼容服务器使用 thinking.type。除非你的提供商文档说明支持，否则请保持关闭。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "LLM Request Timeout"
+msgstr "LLM 请求超时"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Seconds, from 5 to 3600. Local models may need more time."
+msgstr "秒，5 到 3600。本地模型可能需要更长时间。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Send Test Prompt"
+msgstr "发送测试提示"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Language Model"
+msgstr "语言模型"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "For text processing. The test prompt sends a short question to the LLM model above."
+msgstr "用于文本处理。测试提示会向上方的 LLM 模型发送一个简短问题。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Delete Profile"
+msgstr "删除配置文件"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Cancel"
+msgstr "取消"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Save"
+msgstr "保存"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "New Profile"
+msgstr "新建配置文件"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter the server URL first."
+msgstr "请先输入服务器 URL。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Connection verified without the API key: it is sent only over HTTPS or to this computer."
+msgstr "已在不使用 API 密钥的情况下验证连接：密钥仅通过 HTTPS 发送或发送到本机。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Connection verified."
+msgstr "连接已验证。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "No models returned. You can enter model IDs manually."
+msgstr "未返回任何模型。你可以手动输入模型 ID。"
+
+#. Leave {count} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "{count} models found. Choose models and save the profile."
+msgstr "找到 {count} 个模型。请选择模型并保存配置文件。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter an LLM model first."
+msgstr "请先输入 LLM 模型。"
+
+#. Leave {model} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Answer from {model}"
+msgstr "来自 {model} 的回答"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Discard Changes?"
+msgstr "放弃更改？"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The changes to this profile are not saved."
+msgstr "对此配置文件的更改尚未保存。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Keep Editing"
+msgstr "继续编辑"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Discard"
+msgstr "放弃"
+
+#. Leave {name} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Delete “{name}”?"
+msgstr "删除“{name}”？"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The profile and its saved API key are removed."
+msgstr "将移除此配置文件及其保存的 API 密钥。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Delete"
+msgstr "删除"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter a server URL that starts with http:// or https://."
+msgstr "请输入以 http:// 或 https:// 开头的服务器 URL。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Remove the user name and password from the server URL. Use the API key field."
+msgstr "请从服务器 URL 中删除用户名和密码，改用 API 密钥字段。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Remove the part after ? or # from the server URL. The API version has its own field."
+msgstr "请删除服务器 URL 中 ? 或 # 之后的部分。API 版本有单独的字段。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The server URL is invalid."
+msgstr "服务器 URL 无效。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter a profile name."
+msgstr "请输入配置文件名称。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Deployment-scoped batch transcription requires a dated API version, such as 2025-03-01-preview."
+msgstr "部署范围的批量转录需要带日期的 API 版本，例如 2025-03-01-preview。"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The server profile is not complete. Enter its server URL and transcription model."
+msgstr "服务器配置文件不完整。请输入其服务器 URL 和转录模型。"
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The OpenAI-compatible plugin stopped: {error}"
+msgstr "OpenAI 兼容插件已停止：{error}"
 
 #: crates/typewhisper/src/terminals.rs
 msgid "TypeWhisper pastes dictations into terminal apps with Ctrl+Shift+V, because terminals pass Ctrl+V on to the program running in them. GNOME Terminal, Ptyxis, Console, Konsole, Alacritty, kitty, WezTerm, foot, Ghostty and other well-known terminals are always included. Add another terminal if dictating into it pastes nothing."

@@ -15,6 +15,7 @@ serde_json.workspace = true
 tw-platform.workspace = true
 tw-plugin-host.workspace = true
 tw-plugin-protocol.workspace = true
+tw-openai-compatible.workspace = true
 async-channel = "2"
 futures-util = "0.3"
 regex = "1"

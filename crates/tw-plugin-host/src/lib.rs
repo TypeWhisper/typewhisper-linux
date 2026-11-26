@@ -160,6 +160,8 @@ pub enum PluginError {
         code: i64,
         message: String,
         kind: Option<String>,
+        /// The service's own words, when the plugin passed them on.
+        detail: Option<String>,
     },
     /// The plugin closed its output or sent something that is not a response.
     Protocol(String),
@@ -382,6 +384,21 @@ impl PluginProcess {
         })
     }
 
+    /// Like [`Self::call`], with a limit the caller sets, for requests whose
+    /// time depends on a setting, such as a language model's request timeout.
+    pub fn call_with_limit(
+        &mut self,
+        method: &str,
+        params: Value,
+        limit: Duration,
+        on_notification: &mut dyn FnMut(&str, &Value),
+    ) -> Result<Value, PluginError> {
+        let limit = Limit::Total(limit);
+        self.within(method, limit, |process| {
+            process.request(method, params, limit, on_notification)
+        })
+    }
+
     /// Transcribes 16 kHz mono audio with the loaded model.
     pub fn transcribe(
         &mut self,
@@ -468,6 +485,7 @@ impl PluginProcess {
                                     .unwrap_or("plugin error")
                                     .to_owned(),
                                 kind: error["data"]["kind"].as_str().map(str::to_owned),
+                                detail: error["data"]["detail"].as_str().map(str::to_owned),
                             });
                         }
                         return Ok(message.get("result").cloned().unwrap_or(Value::Null));
@@ -796,6 +814,41 @@ mod tests {
         assert!(matches!(loaded, Err(PluginError::TimedOut(m)) if m == "transcription.loadModel"));
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(killed(&process));
+        drop(process);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_call_with_its_own_limit_waits_that_long() {
+        let root = temp_root("own-limit");
+        // The answer comes after the quick limit, but within the caller's.
+        let plugin = fake_plugin(
+            &root,
+            &format!("cat initialize.frame\nsleep 2.5\ncat answer.frame\n{HANG}"),
+            &[
+                ("initialize.frame", response(1, json!({}))),
+                ("answer.frame", response(2, json!({"text": "done"}))),
+            ],
+        );
+        let (mut process, _) = start_fake(&plugin, &root, FAST).unwrap();
+        let answered = process.call_with_limit(
+            "llm.process",
+            json!({}),
+            Duration::from_secs(8),
+            &mut |_, _| {},
+        );
+        assert_eq!(answered.unwrap(), json!({"text": "done"}));
+
+        let stopped = process.call_with_limit(
+            "llm.process",
+            json!({}),
+            Duration::from_millis(300),
+            &mut |_, _| {},
+        );
+        assert!(
+            matches!(&stopped, Err(PluginError::TimedOut(m)) if m == "llm.process"),
+            "{stopped:?}"
+        );
         drop(process);
         let _ = std::fs::remove_dir_all(root);
     }

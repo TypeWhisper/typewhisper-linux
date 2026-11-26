@@ -30,9 +30,11 @@ terminals that show up in AT-SPI.
 | `crates/tw-plugin-protocol` | Wire protocol between the app and plugin processes |
 | `crates/tw-plugin-host` | Finds installed plugins, starts them and calls them |
 | `crates/tw-openai-transcription` | Speech to text over OpenAI-style `/audio/transcriptions` endpoints, shared by the cloud plugins |
+| `crates/tw-openai-compatible` | Server profiles of the OpenAI-compatible engine and the rules its requests follow, shared by the app and the plugin |
 | `plugins/parakeet` | NVIDIA Parakeet through sherpa-onnx, as a plugin process |
 | `plugins/whisper-cpp` | OpenAI Whisper through whisper.cpp, as a plugin process |
 | `plugins/groq` | Groq's hosted Whisper models, as a plugin process |
+| `plugins/openai-compatible` | Any server with OpenAI's API (LM Studio, Ollama, vLLM, OpenAI, Azure): transcription in batch or over the Realtime WebSocket, and language models |
 | `gnome-shell-extension` | Indicator overlay and focused-app reporting on GNOME |
 | `packaging` | Flatpak manifest, desktop file, AppStream metadata |
 | `tools` | Headless VM sessions, probes for portal behaviour, Flatpak helpers |
@@ -94,12 +96,15 @@ target/release/typewhisper
 ```
 
 The script builds the release, installs a `.desktop` file that points at it and
-copies the Parakeet, Whisper and Groq plugins to `~/.local/share/typewhisper/plugins`.
-The desktop portals refuse an app ID without a matching `.desktop` file. In the
-window, set up the shortcut, allow typing (on GNOME, switch on "Allow Remote
-Interaction" in the dialog) and download the speech model. Under Engine, pick
-Whisper and one of its models to dictate with it instead of Parakeet, or Groq
-with your Groq API key.
+copies the Parakeet, Whisper, Groq and OpenAI-compatible plugins to
+`~/.local/share/typewhisper/plugins`. The desktop portals refuse an app ID
+without a matching `.desktop` file. In the window, set up the shortcut, allow
+typing (on GNOME, switch on "Allow Remote Interaction" in the dialog) and
+download the speech model. Under Engine, pick Whisper and one of its models to
+dictate with it instead of Parakeet, or Groq with your Groq API key. For a
+server with OpenAI's API, such as LM Studio, Ollama or vLLM, add a profile
+under OpenAI Compatible, then pick OpenAI Compatible and the profile under
+Engine.
 
 Flatpak:
 
