@@ -4,6 +4,8 @@
 //! `models.download` fetches the sherpa-onnx release archive, checks its SHA-256
 //! and unpacks it, reporting progress as `models.progress` notifications.
 
+mod chunks;
+
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -108,10 +110,12 @@ impl Plugin {
                     .take()
                     .ok_or((-32003, "no open request".to_string()))?;
                 let started = Instant::now();
-                let stream = recognizer.create_stream();
-                stream.accept_waveform(16_000, &samples);
-                recognizer.decode(&stream);
-                let text = stream.get_result().map(|r| r.text).unwrap_or_default();
+                let text = chunks::transcribe(&samples, |chunk| {
+                    let stream = recognizer.create_stream();
+                    stream.accept_waveform(16_000, chunk);
+                    recognizer.decode(&stream);
+                    stream.get_result().map(|r| r.text).unwrap_or_default()
+                });
                 Ok(json!({
                     "requestId": request_id,
                     "text": text.trim(),
