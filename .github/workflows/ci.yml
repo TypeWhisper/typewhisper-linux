@@ -169,6 +169,19 @@ jobs:
         run: >
           flatpak install --system --noninteractive -y flathub
           org.freedesktop.Sdk.Extension.rust-stable//26.08
+      # flatpak-builder keeps the result of every module in .flatpak-builder/cache
+      # and reuses it while the module and the ones before it are unchanged. The
+      # app and the plugin build from the checkout and rebuild every time; ONNX
+      # Runtime, sherpa-onnx and gtk4-layer-shell come from the cache. A changed
+      # manifest saves a new entry; pull requests read the entries of main.
+      - name: Restore the flatpak-builder cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .flatpak-builder/cache
+            .flatpak-builder/downloads
+          key: flatpak-builder-${{ matrix.arch }}-${{ hashFiles('packaging/flatpak/com.typewhisper.*.json', 'packaging/flatpak/*.cmake') }}
+          restore-keys: flatpak-builder-${{ matrix.arch }}-
       - name: Build and install the app
         run: >
           flatpak-builder --install --force-clean --disable-rofiles-fuse
