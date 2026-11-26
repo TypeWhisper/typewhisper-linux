@@ -67,6 +67,10 @@ msgstr "开始和停止听写"
 msgid "Runs offline with no API key."
 msgstr "离线运行，无需 API 密钥。"
 
+#: crates/typewhisper/src/app.rs
+msgid "Runs in the cloud with your API key."
+msgstr "使用你的 API 密钥在云端运行。"
+
 #. Leave {model} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "{model} (English)"
@@ -237,6 +241,10 @@ msgid "Loading model…"
 msgstr "正在加载模型…"
 
 #: crates/typewhisper/src/app.rs
+msgid "Enter an API key below."
+msgstr "请在下方输入 API 密钥。"
+
+#: crates/typewhisper/src/app.rs
 msgid "Restart"
 msgstr "重新启动"
 
@@ -284,6 +292,15 @@ msgstr "还需要下载语音模型，才能开始听写。"
 msgid "The speech model stopped unexpectedly. Restart it below."
 msgstr "语音模型意外停止。请在下方重新启动。"
 
+#: crates/typewhisper/src/app.rs
+msgid "API key required"
+msgstr "需要 API 密钥"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "An API key for {engine} still needs to be entered below before dictation can run."
+msgstr "还需要在下方输入 {engine} 的 API 密钥，才能开始听写。"
+
 #. Leave {key} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "Press {key} in any app to begin."
@@ -306,9 +323,31 @@ msgstr "未安装 Parakeet 插件。"
 msgid "The plugin host crashed."
 msgstr "插件主机崩溃了。"
 
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The keyring could not be read: {error}"
+msgstr "无法读取密钥环：{error}"
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The API key could not be saved in the keyring: {error}"
+msgstr "无法将 API 密钥保存到密钥环：{error}"
+
+#: crates/typewhisper/src/app.rs
+msgid "API key saved."
+msgstr "API 密钥已保存。"
+
+#: crates/typewhisper/src/app.rs
+msgid "API key removed."
+msgstr "API 密钥已移除。"
+
 #: crates/typewhisper/src/app.rs
 msgid "Still working on the last dictation."
 msgstr "仍在处理上一次听写。"
+
+#: crates/typewhisper/src/app.rs crates/typewhisper/src/cloud.rs
+msgid "An API key is required for transcription."
+msgstr "转录需要 API 密钥。"
 
 #: crates/typewhisper/src/app.rs
 msgid "The speech model is not loaded."
@@ -329,6 +368,54 @@ msgstr "语音模型已停止，正在重新启动…"
 #: crates/typewhisper/src/app.rs
 msgid "Inserted"
 msgstr "已插入"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "When {engine} is the selected engine, recorded audio is sent to {engine} for transcription. The API key is stored in the desktop's keyring."
+msgstr "选择 {engine} 作为引擎时，录制的音频会发送到 {engine} 进行转录。API 密钥保存在桌面的密钥环中。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rejected the API key. Replace it in the TypeWhisper window."
+msgstr "{engine} 拒绝了该 API 密钥。请在 TypeWhisper 窗口中更换。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "This {engine} key does not have permission for the request."
+msgstr "此 {engine} 密钥没有执行该请求的权限。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rate limit reached. Wait and try again."
+msgstr "已达到 {engine} 速率限制。请稍候再试。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Could not reach {engine}. Check your internet connection."
+msgstr "无法连接 {engine}。请检查你的网络连接。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} timed out. Try again."
+msgstr "{engine} 请求超时。请重试。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Recording exceeds {engine}'s upload limit. Use a shorter recording."
+msgstr "录音超出 {engine} 的上传限制。请使用较短的录音。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} could not complete the request. Check the selected model and try again."
+msgstr "{engine} 无法完成请求。请检查所选模型后重试。"
+
+#: crates/typewhisper/src/cloud.rs
+msgid "API Key"
+msgstr "API 密钥"
+
+#: crates/typewhisper/src/cloud.rs
+msgid "Remove API key"
+msgstr "移除 API 密钥"
 
 #: crates/typewhisper/src/terminals.rs
 msgid "TypeWhisper pastes dictations into terminal apps with Ctrl+Shift+V, because terminals pass Ctrl+V on to the program running in them. GNOME Terminal, Ptyxis, Console, Konsole, Alacritty, kitty, WezTerm, foot, Ghostty and other well-known terminals are always included. Add another terminal if dictating into it pastes nothing."

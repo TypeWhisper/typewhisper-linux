@@ -14,12 +14,15 @@ use tw_platform::accessibility::{Focus, FocusedField};
 use tw_platform::audio::{LevelMeter, Recorder, SAMPLE_RATE};
 use tw_platform::i18n::{n_, tr, tr_with};
 use tw_platform::insert::{PasteKeys, TextInserter};
+use tw_platform::secrets::{SecretError, SecretStore};
 use tw_platform::settings::{self, Settings};
 use tw_platform::shortcuts::{self, BoundShortcut, Command, PressInterpreter};
 use tw_platform::zbus;
 use tw_plugin_host::{InstalledPlugin, PluginError, PluginProcess, discover, plugin_dirs};
+use tw_plugin_protocol::{PluginSettings, error_kind};
 
 use crate::APP_ID;
+use crate::cloud::{self, ApiKeyGroup};
 use crate::formatting;
 use crate::kwin_script;
 use crate::overlay::Overlay;
@@ -34,6 +37,9 @@ const SHORTCUT_DESCRIPTION: &str = n_("Start and stop dictation");
 const MIN_SAMPLES: usize = SAMPLE_RATE as usize / 4;
 
 const MODEL_SUMMARY: &str = n_("Runs offline with no API key.");
+const CLOUD_MODEL_SUMMARY: &str = n_("Runs in the cloud with your API key.");
+/// The macOS plugins' setting for the model a cloud engine uses.
+const SELECTED_PLUGIN_MODEL: &str = "selectedModel";
 /// How long the indicator keeps the result of a dictation on screen.
 const INSERTED_FEEDBACK: Duration = Duration::from_millis(900);
 const ERROR_FEEDBACK: Duration = Duration::from_secs(3);
@@ -67,6 +73,7 @@ struct Ui {
     model_progress_label: gtk::Label,
     model_spinner: adw::Spinner,
     model_ready: gtk::Box,
+    api_key: ApiKeyGroup,
     last_group: adw::PreferencesGroup,
     last_row: adw::ActionRow,
     preserve_clipboard: adw::SwitchRow,
@@ -87,6 +94,8 @@ enum ModelState {
     Downloading(Option<f64>),
     Loading,
     Ready,
+    /// A cloud engine has no API key yet.
+    NeedsKey,
     /// Downloading or loading failed; the download can be repeated.
     Failed(String),
     /// The plugin process died while setting up the model. The button starts a
@@ -174,6 +183,10 @@ struct State {
     models: Vec<ModelInfo>,
     /// The model in use, an index into `models`.
     model_index: Option<usize>,
+    /// The running engine takes settings, such as an API key.
+    takes_settings: bool,
+    /// The desktop's keyring, opened when an engine first needs it.
+    secrets: Option<Rc<SecretStore>>,
     model: ModelState,
     phase: Phase,
     busy: bool,
@@ -282,6 +295,20 @@ pub fn startup(application: &adw::Application) {
         #[weak]
         app,
         move |picker| choose_model(&app, picker.selected())
+    ));
+    app.ui.api_key.connect_save(glib::clone!(
+        #[weak]
+        app,
+        move |key| {
+            glib::spawn_future_local(save_api_key(app, Some(key)));
+        }
+    ));
+    app.ui.api_key.connect_remove(glib::clone!(
+        #[weak]
+        app,
+        move || {
+            glib::spawn_future_local(save_api_key(app, None));
+        }
     ));
     for (row, key, default) in [
         (
@@ -595,6 +622,8 @@ fn build_ui(application: &adw::Application) -> Ui {
     engine.add(&engine_picker);
     engine.add(&model_picker);
     engine.add(&model_row);
+    // Below the engine, for an engine that needs an API key.
+    let api_key = ApiKeyGroup::new();
 
     let last_row = adw::ActionRow::builder()
         .use_markup(false)
@@ -663,6 +692,7 @@ fn build_ui(application: &adw::Application) -> Ui {
     page.add(&permissions);
     page.add(&hotkey);
     page.add(&engine);
+    page.add(&api_key.group);
     page.add(&clipboard);
     page.add(&terminal_apps);
     page.add(&formatting);
@@ -720,6 +750,7 @@ fn build_ui(application: &adw::Application) -> Ui {
         model_progress_label,
         model_spinner,
         model_ready,
+        api_key,
         last_group,
         last_row,
         preserve_clipboard,
@@ -941,6 +972,7 @@ impl App {
             ModelState::Unavailable(_)
                 | ModelState::NotDownloaded
                 | ModelState::Ready
+                | ModelState::NeedsKey
                 | ModelState::Failed(_)
                 | ModelState::Lost
         );
@@ -983,6 +1015,10 @@ impl App {
             ModelState::Downloading(Some(_)) => tr("Downloading…"),
             ModelState::Downloading(None) => tr("Unpacking…"),
             ModelState::Loading => tr("Loading model…"),
+            ModelState::NeedsKey => tr("Enter an API key below."),
+            ModelState::Ready if self.engine().is_some_and(|e| is_cloud(&e)) => {
+                tr(CLOUD_MODEL_SUMMARY)
+            }
             ModelState::Ready => tr(MODEL_SUMMARY),
         };
         ui.model_row.set_subtitle(&subtitle);
@@ -1010,6 +1046,50 @@ impl App {
         ui.model_ready.set_visible(model == ModelState::Ready);
         self.refresh_picker_sensitivity();
         self.refresh_hero();
+    }
+
+    /// Shows the outcome of a failed setup step: starting, configuring,
+    /// downloading or loading.
+    fn setup_failed(&self, error: CallError) {
+        match error {
+            CallError::Failed(error) => self.set_model(ModelState::Failed(error)),
+            CallError::NeedsKey => self.set_model(ModelState::NeedsKey),
+            CallError::Lost => self.plugin_lost_during_setup(),
+        }
+    }
+
+    /// Shows the API key group for a cloud engine, empty until the key is
+    /// read from the keyring, and hides it for others.
+    fn show_api_key_group(&self, engine: &InstalledPlugin) {
+        let name = is_cloud(engine).then_some(engine.manifest.name.as_str());
+        self.ui.api_key.show(name, None);
+    }
+
+    /// The model the running cloud engine saved, under its macOS key.
+    fn plugin_model(&self) -> Option<String> {
+        let engine = self.engine()?;
+        let values = self.settings.borrow().plugin_values(&engine.manifest.id);
+        values
+            .get(SELECTED_PLUGIN_MODEL)?
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    fn save_plugin_model(&self, model: &str) {
+        let Some(engine) = self.engine() else {
+            return;
+        };
+        let saved = self.settings.borrow_mut().set_plugin_value(
+            &engine.manifest.id,
+            SELECTED_PLUGIN_MODEL,
+            json!(model),
+        );
+        if let Err(error) = saved {
+            self.toast(&tr_with(
+                "The setting could not be saved: {error}",
+                &[("error", &error.to_string())],
+            ));
+        }
     }
 
     fn plugin_lost_during_setup(&self) {
@@ -1090,6 +1170,18 @@ impl App {
                     "warning",
                     tr("No model loaded"),
                     tr("The speech model stopped unexpectedly. Restart it below."),
+                ),
+                ModelState::NeedsKey => Hero::new(
+                    Some("dialog-password-symbolic"),
+                    "dim-label",
+                    tr("API key required"),
+                    tr_with(
+                        "An API key for {engine} still needs to be entered below before dictation can run.",
+                        &[(
+                            "engine",
+                            &engine_name(state.engine.and_then(|i| state.engines.get(i))),
+                        )],
+                    ),
                 ),
                 ModelState::Ready => {
                     // One text, so that a translation can put the key anywhere.
@@ -1292,6 +1384,7 @@ async fn start_plugin(app: Rc<App>) {
     }
     app.refresh_pickers();
     app.set_model(ModelState::Searching);
+    app.show_api_key_group(&engine);
     let started: PluginStart = gio::spawn_blocking(move || {
         let data = tw_platform::data_dir().map_err(|e| e.to_string())?;
         let plugin_data = data.join("plugin-data").join(&engine.manifest.id);
@@ -1309,7 +1402,12 @@ async fn start_plugin(app: Rc<App>) {
 
     match started {
         Ok((process, models)) => {
-            let saved = app.settings.borrow().string(settings::SELECTED_MODEL);
+            let takes_settings = process.takes_settings();
+            // A cloud engine keeps its model as its macOS plugin does.
+            let saved = takes_settings
+                .then(|| app.plugin_model())
+                .flatten()
+                .or_else(|| app.settings.borrow().string(settings::SELECTED_MODEL));
             let index = pick_model(&models, saved.as_deref());
             let installed = index.is_some_and(|i| models[i].installed);
             {
@@ -1317,8 +1415,16 @@ async fn start_plugin(app: Rc<App>) {
                 state.plugin = Some(Arc::new(Mutex::new(process)));
                 state.models = models;
                 state.model_index = index;
+                state.takes_settings = takes_settings;
             }
             app.refresh_pickers();
+            if takes_settings {
+                match configure_plugin(&app).await {
+                    Ok(true) => {}
+                    Ok(false) => return app.set_model(ModelState::NeedsKey),
+                    Err(error) => return app.setup_failed(error),
+                }
+            }
             match index {
                 Some(_) if installed => load_model(app).await,
                 Some(_) => app.set_model(ModelState::NotDownloaded),
@@ -1389,6 +1495,9 @@ fn choose_model(app: &Rc<App>, index: u32) {
         model
     };
     save_choice(app, settings::SELECTED_MODEL, &model.id);
+    if app.state.borrow().takes_settings {
+        app.save_plugin_model(&model.id);
+    }
     if model.installed {
         glib::spawn_future_local(load_model(Rc::clone(app)));
     } else {
@@ -1396,13 +1505,118 @@ fn choose_model(app: &Rc<App>, index: u32) {
     }
 }
 
+/// A cloud engine sends the audio to a service, so the window names where it
+/// goes and asks for the key there.
+fn is_cloud(engine: &InstalledPlugin) -> bool {
+    engine.manifest.locality == "cloud"
+}
+
+/// The engine's name, for texts that name it.
+fn engine_name(engine: Option<&InstalledPlugin>) -> String {
+    engine.map(|e| e.manifest.name.clone()).unwrap_or_default()
+}
+
+fn keyring_failed(error: &SecretError) -> CallError {
+    CallError::Failed(tr_with(
+        "The keyring could not be read: {error}",
+        &[("error", &error.to_string())],
+    ))
+}
+
+/// The desktop's keyring, opened on first use. Opening it may ask the user
+/// to unlock it.
+async fn secret_store(app: &App) -> Result<Rc<SecretStore>, SecretError> {
+    if let Some(store) = app.state.borrow().secrets.clone() {
+        return Ok(store);
+    }
+    let store = Rc::new(SecretStore::open().await?);
+    app.state.borrow_mut().secrets = Some(Rc::clone(&store));
+    Ok(store)
+}
+
+/// Gives the running engine its settings and secrets. Returns whether the
+/// plugin has what it needs, as it answers.
+async fn configure_plugin(app: &Rc<App>) -> Result<bool, CallError> {
+    let (Some(engine), Some(plugin)) = (app.engine(), app.state.borrow().plugin.clone()) else {
+        return Ok(false);
+    };
+    let id = engine.manifest.id.clone();
+    // Only a cloud engine opens the keyring, so a local one never asks to unlock it.
+    let mut secrets = std::collections::BTreeMap::new();
+    if is_cloud(&engine) {
+        let store = secret_store(app).await.map_err(|e| keyring_failed(&e))?;
+        secrets = store.load_all(&id).await.map_err(|e| keyring_failed(&e))?;
+        app.ui.api_key.show(
+            Some(&engine.manifest.name),
+            secrets.get(cloud::API_KEY).map(String::as_str),
+        );
+    }
+    let settings = PluginSettings {
+        values: app.settings.borrow().plugin_values(&id),
+        secrets,
+    };
+    let name = engine.manifest.name;
+    let answer = gio::spawn_blocking(move || -> Result<Value, CallError> {
+        let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
+        process
+            .configure(&settings)
+            .map_err(|e| CallError::from_plugin(e, &name))
+    })
+    .await
+    .unwrap_or(Err(CallError::Lost))?;
+    Ok(answer["configured"].as_bool().unwrap_or(true))
+}
+
+/// Saves the API key of the engine in use, or removes it with `None`, and
+/// hands the running plugin the change.
+async fn save_api_key(app: Rc<App>, key: Option<String>) {
+    let Some(engine) = app.engine() else {
+        return;
+    };
+    let key = key.filter(|k| !k.is_empty());
+    app.ui.api_key.set_sensitive(false);
+    let saved = match secret_store(&app).await {
+        Ok(store) => match &key {
+            Some(key) => store.store(&engine.manifest.id, cloud::API_KEY, key).await,
+            None => store.delete(&engine.manifest.id, cloud::API_KEY).await,
+        },
+        Err(error) => Err(error),
+    };
+    app.ui.api_key.set_sensitive(true);
+    if let Err(error) = saved {
+        app.toast(&tr_with(
+            "The API key could not be saved in the keyring: {error}",
+            &[("error", &error.to_string())],
+        ));
+        return;
+    }
+    app.ui.api_key.show_key(key.as_deref());
+    app.toast(&if key.is_some() {
+        tr("API key saved.")
+    } else {
+        tr("API key removed.")
+    });
+    if app.state.borrow().plugin.is_none() {
+        start_plugin(app).await;
+        return;
+    }
+    match configure_plugin(&app).await {
+        Ok(true) => load_model(app).await,
+        Ok(false) => app.set_model(ModelState::NeedsKey),
+        Err(error) => app.setup_failed(error),
+    }
+}
+
 fn call_plugin(
     plugin: &Arc<Mutex<PluginProcess>>,
+    engine: &str,
     method: &str,
     params: Value,
 ) -> Result<Value, CallError> {
     let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
-    Ok(process.call(method, params, &mut |_, _| {})?)
+    process
+        .call(method, params, &mut |_, _| {})
+        .map_err(|e| CallError::from_plugin(e, engine))
 }
 
 async fn load_model(app: Rc<App>) {
@@ -1413,9 +1627,11 @@ async fn load_model(app: Rc<App>) {
         return;
     };
     app.set_model(ModelState::Loading);
+    let engine = engine_name(app.engine().as_ref());
     let loaded = gio::spawn_blocking(move || {
         call_plugin(
             &plugin,
+            &engine,
             "transcription.loadModel",
             json!({"modelId": model.id, "threads": 4}),
         )
@@ -1424,8 +1640,7 @@ async fn load_model(app: Rc<App>) {
     .unwrap_or(Err(CallError::Lost));
     match loaded {
         Ok(_) => app.set_model(ModelState::Ready),
-        Err(CallError::Failed(error)) => app.set_model(ModelState::Failed(error)),
-        Err(CallError::Lost) => app.plugin_lost_during_setup(),
+        Err(error) => app.setup_failed(error),
     }
 }
 
@@ -1445,6 +1660,7 @@ async fn download_model(app: Rc<App>) {
         return;
     };
     app.set_model(ModelState::Downloading(Some(0.0)));
+    let engine = engine_name(app.engine().as_ref());
     let (progress_tx, progress_rx) = async_channel::unbounded::<Option<f64>>();
     glib::spawn_future_local(glib::clone!(
         #[strong]
@@ -1457,23 +1673,25 @@ async fn download_model(app: Rc<App>) {
     ));
     let result = gio::spawn_blocking(move || -> Result<Value, CallError> {
         let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
-        Ok(process.call(
-            "models.download",
-            json!({"modelId": model.id, "force": true}),
-            &mut |method, params| {
-                if method != "models.progress" {
-                    return;
-                }
-                let progress = if params["unpacking"].as_bool() == Some(true) {
-                    None
-                } else {
-                    let received = params["receivedBytes"].as_f64().unwrap_or(0.0);
-                    let total = params["totalBytes"].as_f64().unwrap_or(1.0).max(1.0);
-                    Some((received / total).clamp(0.0, 1.0))
-                };
-                let _ = progress_tx.send_blocking(progress);
-            },
-        )?)
+        process
+            .call(
+                "models.download",
+                json!({"modelId": model.id, "force": true}),
+                &mut |method, params| {
+                    if method != "models.progress" {
+                        return;
+                    }
+                    let progress = if params["unpacking"].as_bool() == Some(true) {
+                        None
+                    } else {
+                        let received = params["receivedBytes"].as_f64().unwrap_or(0.0);
+                        let total = params["totalBytes"].as_f64().unwrap_or(1.0).max(1.0);
+                        Some((received / total).clamp(0.0, 1.0))
+                    };
+                    let _ = progress_tx.send_blocking(progress);
+                },
+            )
+            .map_err(|e| CallError::from_plugin(e, &engine))
     })
     .await
     .unwrap_or(Err(CallError::Lost));
@@ -1487,8 +1705,7 @@ async fn download_model(app: Rc<App>) {
             }
             load_model(app).await;
         }
-        Err(CallError::Failed(error)) => app.set_model(ModelState::Failed(error)),
-        Err(CallError::Lost) => app.plugin_lost_during_setup(),
+        Err(error) => app.setup_failed(error),
     }
 }
 
@@ -1500,6 +1717,7 @@ fn start_recording(app: &Rc<App>) {
         match state.model {
             ModelState::Ready => None,
             ModelState::Searching | ModelState::Loading => Some(tr("Loading model…")),
+            ModelState::NeedsKey => Some(tr("An API key is required for transcription.")),
             _ => Some(tr("No model loaded")),
         }
     };
@@ -1559,6 +1777,7 @@ fn stop_recording(app: Rc<App>) {
     };
     app.set_phase(Phase::Transcribing);
     app.indicator("processing", &tr("Transcribing…"));
+    let engine = engine_name(app.engine().as_ref());
     glib::spawn_future_local(async move {
         let transcribed = gio::spawn_blocking(move || -> Result<String, CallError> {
             let samples = recorder.stop().map_err(CallError::Failed)?;
@@ -1568,7 +1787,9 @@ fn stop_recording(app: Rc<App>) {
             let plugin =
                 plugin.ok_or_else(|| CallError::Failed(tr("The speech model is not loaded.")))?;
             let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
-            let result = process.transcribe(&samples, None)?;
+            let result = process
+                .transcribe(&samples, None)
+                .map_err(|e| CallError::from_plugin(e, &engine))?;
             Ok(result["text"].as_str().unwrap_or_default().to_owned())
         })
         .await
@@ -1633,6 +1854,10 @@ fn stop_recording(app: Rc<App>) {
                 }
             }
             Err(CallError::Failed(error)) => Err(error),
+            Err(CallError::NeedsKey) => {
+                app.set_model(ModelState::NeedsKey);
+                Err(tr("An API key is required for transcription."))
+            }
             Err(CallError::Lost) => {
                 // The process is gone or in an unknown state. Start a new one,
                 // which loads the model again.
@@ -1654,18 +1879,26 @@ fn stop_recording(app: Rc<App>) {
 enum CallError {
     /// The plugin or the recording reported an error; the process is fine.
     Failed(String),
+    /// A cloud engine has no API key.
+    NeedsKey,
     /// The plugin process died, stopped answering, panicked a worker or no
     /// longer answers in order.
     Lost,
 }
 
-impl From<PluginError> for CallError {
-    fn from(error: PluginError) -> Self {
+impl CallError {
+    /// Sorts a plugin error; a failure the service reports is explained in
+    /// the app's words with the engine's name.
+    fn from_plugin(error: PluginError, engine: &str) -> Self {
         match error {
             PluginError::Io(_) | PluginError::Protocol(_) | PluginError::TimedOut(_) => {
                 CallError::Lost
             }
-            other => CallError::Failed(other.to_string()),
+            PluginError::Plugin {
+                kind: Some(ref kind),
+                ..
+            } if kind == error_kind::NOT_CONFIGURED => CallError::NeedsKey,
+            other => CallError::Failed(cloud::explain(&other, engine)),
         }
     }
 }

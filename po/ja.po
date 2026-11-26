@@ -67,6 +67,10 @@ msgstr "音声入力を開始・停止"
 msgid "Runs offline with no API key."
 msgstr "APIキーなしでオフラインで動作します。"
 
+#: crates/typewhisper/src/app.rs
+msgid "Runs in the cloud with your API key."
+msgstr "APIキーを使ってクラウドで動作します。"
+
 #. Leave {model} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "{model} (English)"
@@ -237,6 +241,10 @@ msgid "Loading model…"
 msgstr "モデルを読み込み中…"
 
 #: crates/typewhisper/src/app.rs
+msgid "Enter an API key below."
+msgstr "下にAPIキーを入力してください。"
+
+#: crates/typewhisper/src/app.rs
 msgid "Restart"
 msgstr "再起動"
 
@@ -284,6 +292,15 @@ msgstr "音声入力を使うには、まだ音声モデルをダウンロード
 msgid "The speech model stopped unexpectedly. Restart it below."
 msgstr "音声モデルが予期せず停止しました。下のボタンで再起動してください。"
 
+#: crates/typewhisper/src/app.rs
+msgid "API key required"
+msgstr "APIキーが必要です"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "An API key for {engine} still needs to be entered below before dictation can run."
+msgstr "音声入力を使うには、まだ下に {engine} のAPIキーを入力する必要があります。"
+
 #. Leave {key} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "Press {key} in any app to begin."
@@ -306,9 +323,31 @@ msgstr "Parakeet プラグインがインストールされていません。"
 msgid "The plugin host crashed."
 msgstr "プラグインホストがクラッシュしました。"
 
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The keyring could not be read: {error}"
+msgstr "キーリングを読み取れませんでした: {error}"
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The API key could not be saved in the keyring: {error}"
+msgstr "APIキーをキーリングに保存できませんでした: {error}"
+
+#: crates/typewhisper/src/app.rs
+msgid "API key saved."
+msgstr "APIキーを保存しました。"
+
+#: crates/typewhisper/src/app.rs
+msgid "API key removed."
+msgstr "APIキーを削除しました。"
+
 #: crates/typewhisper/src/app.rs
 msgid "Still working on the last dictation."
 msgstr "前回の音声入力をまだ処理しています。"
+
+#: crates/typewhisper/src/app.rs crates/typewhisper/src/cloud.rs
+msgid "An API key is required for transcription."
+msgstr "文字起こしにはAPIキーが必要です。"
 
 #: crates/typewhisper/src/app.rs
 msgid "The speech model is not loaded."
@@ -329,6 +368,54 @@ msgstr "音声モデルが停止しました。再起動しています…"
 #: crates/typewhisper/src/app.rs
 msgid "Inserted"
 msgstr "挿入しました"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "When {engine} is the selected engine, recorded audio is sent to {engine} for transcription. The API key is stored in the desktop's keyring."
+msgstr "{engine} をエンジンとして選択している場合、録音した音声は文字起こしのため {engine} に送信されます。APIキーはデスクトップのキーリングに保存されます。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rejected the API key. Replace it in the TypeWhisper window."
+msgstr "{engine} がAPIキーを拒否しました。TypeWhisperのウィンドウでキーを置き換えてください。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "This {engine} key does not have permission for the request."
+msgstr "この {engine} キーには、このリクエストの権限がありません。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rate limit reached. Wait and try again."
+msgstr "{engine} のレート制限に達しました。しばらく待ってからもう一度お試しください。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Could not reach {engine}. Check your internet connection."
+msgstr "{engine} に接続できませんでした。インターネット接続を確認してください。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} timed out. Try again."
+msgstr "{engine} がタイムアウトしました。もう一度お試しください。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Recording exceeds {engine}'s upload limit. Use a shorter recording."
+msgstr "録音が {engine} のアップロード上限を超えています。より短い録音を使用してください。"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} could not complete the request. Check the selected model and try again."
+msgstr "{engine} がリクエストを完了できませんでした。選択したモデルを確認して、もう一度お試しください。"
+
+#: crates/typewhisper/src/cloud.rs
+msgid "API Key"
+msgstr "APIキー"
+
+#: crates/typewhisper/src/cloud.rs
+msgid "Remove API key"
+msgstr "APIキーを削除"
 
 #: crates/typewhisper/src/terminals.rs
 msgid "TypeWhisper pastes dictations into terminal apps with Ctrl+Shift+V, because terminals pass Ctrl+V on to the program running in them. GNOME Terminal, Ptyxis, Console, Konsole, Alacritty, kitty, WezTerm, foot, Ghostty and other well-known terminals are always included. Add another terminal if dictating into it pastes nothing."
