@@ -278,7 +278,8 @@ async fn start_kwin_script(app: Rc<App>, connection: gio::DBusConnection) {
 }
 
 /// The About dialog. Like the macOS app's About panel, it names the app and
-/// its version; the links and the license are the ones GNOME apps show.
+/// its version; the links and the license are the ones GNOME apps show. Legal
+/// names the speech model and the libraries that run it, see issue #17.
 fn show_about(window: &adw::ApplicationWindow) {
     let dialog = adw::AboutDialog::builder()
         .application_name("TypeWhisper")
@@ -291,6 +292,32 @@ fn show_about(window: &adw::ApplicationWindow) {
     dialog.add_link(
         &tr("Source Code"),
         "https://github.com/TypeWhisper/typewhisper-linux",
+    );
+    // The speech model and the libraries the Parakeet plugin runs it with.
+    // CC BY asks for credit, a link to the license and a note on changes.
+    dialog.add_legal_section(
+        "NVIDIA Parakeet TDT 0.6B v3",
+        Some("© NVIDIA Corporation"),
+        gtk::License::Custom,
+        Some(&tr_with(
+            "Licensed under {license}. TypeWhisper uses the int8 ONNX conversion from sherpa-onnx.",
+            &[(
+                "license",
+                "<a href=\"https://creativecommons.org/licenses/by/4.0/\">CC BY 4.0</a>",
+            )],
+        )),
+    );
+    dialog.add_legal_section(
+        "sherpa-onnx",
+        Some("© Xiaomi Corporation"),
+        gtk::License::Apache20,
+        None,
+    );
+    dialog.add_legal_section(
+        "ONNX Runtime",
+        Some("© Microsoft Corporation"),
+        gtk::License::MitX11,
+        None,
     );
     dialog.present(Some(window));
 }

@@ -76,6 +76,11 @@ msgstr "設定を保存できませんでした: {error}"
 msgid "Source Code"
 msgstr "ソースコード"
 
+#. Leave {license} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "Licensed under {license}. TypeWhisper uses the int8 ONNX conversion from sherpa-onnx."
+msgstr "{license} でライセンスされています。TypeWhisper は sherpa-onnx による int8 の ONNX 変換版を使用します。"
+
 #: crates/typewhisper/src/app.rs
 msgid "Keyboard and Clipboard Access"
 msgstr "キーボードとクリップボードへのアクセス"
