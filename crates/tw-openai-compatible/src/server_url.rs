@@ -96,7 +96,11 @@ pub fn parse(url: &str) -> Result<Parts<'_>, UrlError> {
 /// request adds again, as on macOS and Windows.
 pub fn normalize(url: &str) -> String {
     let mut url = url.trim().trim_end_matches('/');
-    if url.len() >= 3 && url[url.len() - 3..].eq_ignore_ascii_case("/v1") {
+    // `get` stays on character boundaries, so a URL ending in "é" is no panic.
+    let ends_in_v1 = url
+        .get(url.len().saturating_sub(3)..)
+        .is_some_and(|end| end.eq_ignore_ascii_case("/v1"));
+    if ends_in_v1 {
         url = url[..url.len() - 3].trim_end_matches('/');
     }
     match url.split_once("://") {
@@ -211,6 +215,9 @@ mod tests {
             ),
             ("https://example.com/v10", "https://example.com/v10"),
             ("", ""),
+            ("https://example.com/éé", "https://example.com/éé"),
+            ("/v1", ""),
+            ("é", "é"),
         ] {
             assert_eq!(normalize(input), expected, "{input}");
         }

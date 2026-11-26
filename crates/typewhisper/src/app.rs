@@ -207,6 +207,8 @@ struct State {
     terminal_apps: Option<Rc<TerminalApps>>,
     /// The profiles of the OpenAI-compatible engine, when its plugin is installed.
     server_profiles: Option<Rc<ServerProfiles>>,
+    /// Profiles changed during a dictation; the plugin gets them when it ends.
+    reconfigure_pending: bool,
     /// True while KWin runs the script that reports the active window.
     kwin_script: bool,
 }
@@ -1307,9 +1309,15 @@ impl server_profiles::Host for ServerHost {
 /// Gives the running engine its changed settings and loads its model again.
 async fn reconfigure(app: Rc<App>) {
     {
-        // A dictation in progress keeps its engine; the next start reads the change.
-        let state = app.state.borrow();
+        // A dictation in progress keeps its server; the change follows when it ends.
+        let mut state = app.state.borrow_mut();
         if state.phase != Phase::Idle || state.busy {
+            state.reconfigure_pending = true;
+            return;
+        }
+        state.reconfigure_pending = false;
+        // A plugin that is starting again reads the profiles as it starts.
+        if state.plugin.is_none() {
             return;
         }
     }
@@ -1662,7 +1670,7 @@ fn is_server_engine(engine: &InstalledPlugin) -> bool {
 /// `selectedModel` means the default profile's transcription model there.
 fn model_setting(engine: &InstalledPlugin) -> &'static str {
     if is_server_engine(engine) {
-        "selectedProfileId"
+        tw_openai_compatible::SELECTED_PROFILE
     } else {
         SELECTED_PLUGIN_MODEL
     }
@@ -2065,6 +2073,9 @@ fn stop_recording(app: Rc<App>) {
         };
         app.state.borrow_mut().busy = false;
         app.set_phase(Phase::Idle);
+        if std::mem::take(&mut app.state.borrow_mut().reconfigure_pending) {
+            glib::spawn_future_local(reconfigure(Rc::clone(&app)));
+        }
         match outcome {
             Ok(()) => app.indicator_feedback("inserting", &tr("Inserted"), INSERTED_FEEDBACK),
             Err(error) => app.dictation_failed(&error),

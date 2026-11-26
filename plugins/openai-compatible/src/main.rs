@@ -18,7 +18,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use serde_json::{Value, json};
-use tw_openai_compatible::{DEFAULT_PROFILE_ID, PLUGIN_ID, Profile, Profiles, secret_name};
+use tw_openai_compatible::{
+    DEFAULT_PROFILE_ID, PLUGIN_ID, Profile, Profiles, SELECTED_PROFILE, secret_name,
+};
 use tw_plugin_protocol::{
     CAPABILITY_SETTINGS, Frame, PROTOCOL_VERSION, PluginSettings, SETTINGS_UPDATE, read_frame,
     write_frame,
@@ -141,6 +143,16 @@ impl Plugin {
             SETTINGS_UPDATE => {
                 self.settings = serde_json::from_value(params.clone())
                     .map_err(|e| rpc_error(-32602, &format!("invalid settings: {e}")))?;
+                // The profile the app saved as chosen, so that readiness is about
+                // that one and not the default profile after a restart.
+                let saved = self
+                    .settings
+                    .values
+                    .get(SELECTED_PROFILE)
+                    .and_then(Value::as_str);
+                if let Some(id) = saved.filter(|id| self.profiles().get(id).is_some()) {
+                    self.selected = id.to_owned();
+                }
                 let configured = self
                     .profiles()
                     .get(&self.selected)
@@ -370,6 +382,29 @@ mod tests {
         assert_eq!(plugin.selected, "openai-compatible-b");
         let unknown = plugin.handle("transcription.loadModel", &json!({"modelId": "missing"}));
         assert!(unknown.is_err());
+        assert_eq!(plugin.selected, "openai-compatible-b");
+    }
+
+    #[test]
+    fn readiness_follows_the_saved_profile() {
+        let mut plugin = plugin();
+        let settings = |selected: &str| {
+            json!({"values": {
+                "profiles": [
+                    {"id": "openai-compatible", "name": "Empty"},
+                    {"id": "openai-compatible-b", "name": "Cloud", "baseURL": "https://api.example.com", "selectedModelId": "whisper-1"}
+                ],
+                "selectedProfileId": selected
+            }})
+        };
+        let configured = plugin
+            .handle(SETTINGS_UPDATE, &settings("openai-compatible-b"))
+            .unwrap();
+        assert_eq!(configured["configured"], true);
+        assert_eq!(plugin.selected, "openai-compatible-b");
+        // A saved ID without a profile leaves the choice alone.
+        let configured = plugin.handle(SETTINGS_UPDATE, &settings("gone")).unwrap();
+        assert_eq!(configured["configured"], true);
         assert_eq!(plugin.selected, "openai-compatible-b");
     }
 

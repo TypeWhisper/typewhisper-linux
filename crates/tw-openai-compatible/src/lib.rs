@@ -17,3 +17,6 @@ pub use profile::{
 
 /// The plugin's ID, the same as on macOS and Windows.
 pub const PLUGIN_ID: &str = "com.typewhisper.openai-compatible";
+
+/// The plugin setting with the ID of the profile the engine uses.
+pub const SELECTED_PROFILE: &str = "selectedProfileId";
