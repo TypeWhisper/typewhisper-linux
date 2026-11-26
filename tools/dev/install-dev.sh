@@ -3,7 +3,7 @@
 # installed app:
 # - a .desktop file whose Exec points at the build, and the icon. The portals
 #   accept the app ID only when a matching .desktop file names a program that exists.
-# - the Parakeet plugin package in the user plugin folder.
+# - the Parakeet and Whisper plugin packages in the user plugin folder.
 # - the translations in <target-dir>/share/locale, where the build looks for them.
 #
 #   tools/dev/install-dev.sh [target-dir]   (default: target, release profile)
@@ -16,7 +16,7 @@ mkdir -p "$target_dir"
 target_dir="$(cd "$target_dir" && pwd)"
 target="$target_dir/release"
 cargo build --release --locked --target-dir "$target_dir" \
-  -p typewhisper -p tw-plugin-parakeet --manifest-path "$repo/Cargo.toml"
+  -p typewhisper -p tw-plugin-parakeet -p tw-plugin-whisper-cpp --manifest-path "$repo/Cargo.toml"
 "$repo/tools/i18n/build-catalogs.sh" "$target_dir/share/locale"
 "$repo/tools/i18n/translate-packaging.sh" "$target_dir/packaging"
 
@@ -49,9 +49,12 @@ done < "$target_dir/packaging/com.typewhisper.TypeWhisper.desktop" > "$apps/com.
 install -Dm644 "$repo/packaging/com.typewhisper.TypeWhisper.svg" \
   "$data/icons/hicolor/scalable/apps/com.typewhisper.TypeWhisper.svg"
 
-plugin="$data/typewhisper/plugins/com.typewhisper.parakeet"
-mkdir -p "$plugin/bin"
-cp "$repo/plugins/parakeet/manifest.json" "$plugin/"
-install -m 755 "$target/tw-plugin-parakeet" "$plugin/bin/tw-plugin-parakeet"
+for entry in parakeet:com.typewhisper.parakeet whisper-cpp:com.typewhisper.whisper-cpp; do
+  name=${entry%%:*}
+  plugin="$data/typewhisper/plugins/${entry##*:}"
+  mkdir -p "$plugin/bin"
+  cp "$repo/plugins/$name/manifest.json" "$plugin/"
+  install -m 755 "$target/tw-plugin-$name" "$plugin/bin/tw-plugin-$name"
+done
 
 echo "Installed. Start with: $target/typewhisper"

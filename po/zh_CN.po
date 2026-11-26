@@ -67,6 +67,11 @@ msgstr "开始和停止听写"
 msgid "Runs offline with no API key."
 msgstr "离线运行，无需 API 密钥。"
 
+#. Leave {model} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "{model} (English)"
+msgstr "{model}（英语）"
+
 #. Leave {error} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "The setting could not be saved: {error}"
@@ -108,6 +113,14 @@ msgstr "设置"
 #: crates/typewhisper/src/app.rs
 msgid "Hotkey"
 msgstr "快捷键"
+
+#: crates/typewhisper/src/app.rs
+msgid "Default Engine"
+msgstr "默认引擎"
+
+#: crates/typewhisper/src/app.rs
+msgid "Model"
+msgstr "模型"
 
 #: crates/typewhisper/src/app.rs
 msgid "Download"
@@ -199,16 +212,17 @@ msgid "Short press to toggle, hold to push-to-talk."
 msgstr "短按切换开关，长按进入按住说话模式。"
 
 #: crates/typewhisper/src/app.rs
-msgid "Looking for the Parakeet plugin…"
-msgstr "正在查找 Parakeet 插件…"
+msgid "Starting…"
+msgstr "正在启动…"
 
 #: crates/typewhisper/src/app.rs
 msgid "The speech model stopped unexpectedly."
 msgstr "语音模型意外停止。"
 
+#. Leave {size} as it is.
 #: crates/typewhisper/src/app.rs
-msgid "Connect to the internet to download it (465 MB)."
-msgstr "请连接互联网以下载（465 MB）。"
+msgid "Connect to the internet to download it ({size})."
+msgstr "请连接互联网以下载（{size}）。"
 
 #: crates/typewhisper/src/app.rs
 msgid "Downloading…"
@@ -237,10 +251,6 @@ msgstr "录音"
 #: crates/typewhisper/src/app.rs
 msgid "Transcribing…"
 msgstr "正在转录…"
-
-#: crates/typewhisper/src/app.rs
-msgid "Starting…"
-msgstr "正在启动…"
 
 #: crates/typewhisper/src/app.rs
 msgid "Needs Access"

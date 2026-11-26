@@ -63,7 +63,7 @@ impl Plugin {
                     "capabilities": ["transcription"],
                     "models": [{
                         "id": MODEL_ID,
-                        "name": "Parakeet TDT 0.6B v3",
+                        "name": "NVIDIA Parakeet TDT 0.6B v3",
                         "languages": "25 European languages",
                         "sizeBytes": MODEL_BYTES,
                         "installed": self.model_installed()

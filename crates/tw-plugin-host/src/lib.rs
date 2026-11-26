@@ -221,6 +221,31 @@ impl Limits {
         }
     }
 
+    /// Takes the transcription time a plugin asks for in `initialize`:
+    ///
+    /// ```json
+    /// "transcriptionTimeout": {"baseSeconds": 180, "audioFactor": 3}
+    /// ```
+    ///
+    /// Whisper's large models need many seconds per 30-second window on a CPU.
+    /// The limits only grow, and only up to a cap, so that no plugin can switch
+    /// the watchdog off.
+    fn with_plugin_request(self, info: &Value) -> Limits {
+        let requested = &info["transcriptionTimeout"];
+        let base = requested["baseSeconds"]
+            .as_u64()
+            .map_or(self.transcribe_base, Duration::from_secs);
+        let per_audio = requested["audioFactor"]
+            .as_u64()
+            .map_or(self.transcribe_per_audio, |f| f.min(1_000) as u32);
+        Limits {
+            transcribe_base: base.clamp(self.transcribe_base, MOST_TRANSCRIBE_BASE),
+            transcribe_per_audio: per_audio
+                .clamp(self.transcribe_per_audio, MOST_TRANSCRIBE_PER_AUDIO),
+            ..self
+        }
+    }
+
     /// The time for `transcription.begin`, the audio and `transcription.end` together.
     fn transcription(&self, samples: usize) -> Duration {
         let audio = Duration::from_millis(samples as u64 * 1000 / SAMPLE_RATE);
@@ -230,6 +255,10 @@ impl Limits {
 
 /// Sample rate of the PCM frames the protocol carries.
 const SAMPLE_RATE: u64 = 16_000;
+
+/// The longest transcription limits a plugin may ask for.
+const MOST_TRANSCRIBE_BASE: Duration = Duration::from_secs(600);
+const MOST_TRANSCRIBE_PER_AUDIO: u32 = 10;
 
 /// How long the plugin has before the host gives up on it.
 #[derive(Debug, Clone, Copy)]
@@ -302,6 +331,7 @@ impl PluginProcess {
             json!({"protocolVersion": PROTOCOL_VERSION, "hostVersion": host_version, "dataDir": data_dir}),
             &mut |_, _| {},
         )?;
+        process.limits = limits.with_plugin_request(&info);
         Ok((process, info))
     }
 
@@ -777,5 +807,24 @@ mod tests {
             Limits::DEFAULT.transcription(minute),
             Duration::from_secs(90)
         );
+    }
+
+    #[test]
+    fn gives_a_slow_plugin_the_time_it_asks_for_within_bounds() {
+        let minute = 60 * SAMPLE_RATE as usize;
+        let ask = |base: u64, factor: u64| {
+            Limits::DEFAULT
+                .with_plugin_request(
+                    &json!({"transcriptionTimeout": {"baseSeconds": base, "audioFactor": factor}}),
+                )
+                .transcription(minute)
+        };
+        assert_eq!(ask(180, 3), Duration::from_secs(180 + 3 * 60));
+        // Never shorter than the default, never longer than the cap.
+        assert_eq!(ask(1, 0), Duration::from_secs(90));
+        assert_eq!(ask(1_000_000, 1_000), Duration::from_secs(600 + 10 * 60));
+        let unchanged = Limits::DEFAULT.with_plugin_request(&json!({"models": []}));
+        assert_eq!(unchanged.transcription(minute), Duration::from_secs(90));
+        assert_eq!(unchanged.load_model, Limits::DEFAULT.load_model);
     }
 }

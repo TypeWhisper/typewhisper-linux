@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Writes the license notices of the Rust crates that the app and the Parakeet
-# plugin compile in to packaging/licenses/, with cargo-about. Run it after every
+# Writes the license notices of the Rust crates that the app and the plugins
+# compile in to packaging/licenses/, with cargo-about. Run it after every
 # change to Cargo.lock. With --check it changes nothing and fails while a file
 # is out of date.
 #
@@ -26,7 +26,7 @@ cargo fetch --locked --quiet
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 stale=0
-for entry in crates/typewhisper:typewhisper plugins/parakeet:parakeet; do
+for entry in crates/typewhisper:typewhisper plugins/parakeet:parakeet plugins/whisper-cpp:whisper-cpp; do
   crate=${entry%%:*}
   out="packaging/licenses/${entry##*:}-crates.txt"
   cargo about generate --frozen --manifest-path "$crate/Cargo.toml" \
