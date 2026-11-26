@@ -3,6 +3,7 @@ mod cloud;
 mod formatting;
 mod kwin_script;
 mod overlay;
+mod server_profiles;
 mod shell_bridge;
 mod terminals;
 mod waveform;

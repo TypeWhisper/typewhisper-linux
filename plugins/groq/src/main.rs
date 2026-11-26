@@ -218,7 +218,10 @@ fn reply(id: Value, result: RpcResult) -> Value {
         Err((code, message, kind)) => {
             let mut error = json!({"code": code, "message": message});
             if let Some(kind) = kind {
-                error["data"] = json!(ErrorData { kind: kind.into() });
+                error["data"] = json!(ErrorData {
+                    kind: kind.into(),
+                    detail: None,
+                });
             }
             json!({"jsonrpc": "2.0", "id": id, "error": error})
         }

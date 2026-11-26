@@ -26,6 +26,7 @@ use crate::cloud::{self, ApiKeyGroup};
 use crate::formatting;
 use crate::kwin_script;
 use crate::overlay::Overlay;
+use crate::server_profiles::{self, ServerProfiles};
 use crate::shell_bridge::ShellBridge;
 use crate::terminals::{self, TerminalApps};
 
@@ -78,6 +79,7 @@ struct Ui {
     last_row: adw::ActionRow,
     preserve_clipboard: adw::SwitchRow,
     terminal_apps: adw::PreferencesGroup,
+    servers: adw::PreferencesGroup,
     app_formatting: adw::SwitchRow,
     standalone_value_period: adw::SwitchRow,
 }
@@ -203,6 +205,10 @@ struct State {
     /// The indicator on desktops with a layer shell; GNOME has the extension.
     overlay: Option<Overlay>,
     terminal_apps: Option<Rc<TerminalApps>>,
+    /// The profiles of the OpenAI-compatible engine, when its plugin is installed.
+    server_profiles: Option<Rc<ServerProfiles>>,
+    /// Profiles changed during a dictation; the plugin gets them when it ends.
+    reconfigure_pending: bool,
     /// True while KWin runs the script that reports the active window.
     kwin_script: bool,
 }
@@ -689,6 +695,16 @@ fn build_ui(application: &adw::Application) -> Ui {
     formatting.add(&app_formatting);
     formatting.add(&standalone_value_period);
 
+    // Filled once the plugin is found, see `ServerProfiles`.
+    let servers = adw::PreferencesGroup::builder()
+        .title("OpenAI Compatible")
+        .description(tr(
+            "Servers with OpenAI's API, such as LM Studio, Ollama, vLLM or a cloud service. \
+             Each profile has its own URL, API key and models.",
+        ))
+        .visible(false)
+        .build();
+
     let page = adw::PreferencesPage::new();
     page.add(&status);
     page.add(&last_group);
@@ -696,6 +712,7 @@ fn build_ui(application: &adw::Application) -> Ui {
     page.add(&hotkey);
     page.add(&engine);
     page.add(&api_key.group);
+    page.add(&servers);
     page.add(&clipboard);
     page.add(&terminal_apps);
     page.add(&formatting);
@@ -758,6 +775,7 @@ fn build_ui(application: &adw::Application) -> Ui {
         last_row,
         preserve_clipboard,
         terminal_apps,
+        servers,
         app_formatting,
         standalone_value_period,
     }
@@ -931,6 +949,24 @@ impl App {
         state.engine.and_then(|i| state.engines.get(i)).cloned()
     }
 
+    /// Who failures of the running engine are about.
+    fn source(&self) -> Source {
+        let engine = self.engine();
+        let server = engine.as_ref().is_some_and(is_server_engine);
+        let name = match self.current_model() {
+            Some(model) if server => model.name,
+            _ => engine_name(engine.as_ref()),
+        };
+        Source { name, server }
+    }
+
+    /// The server the running OpenAI-compatible engine sends recordings to.
+    fn server_url(&self) -> Option<String> {
+        let model = self.current_model()?;
+        let profiles = self.state.borrow().server_profiles.clone()?;
+        profiles.base_url(&model.id).filter(|url| !url.is_empty())
+    }
+
     /// The model in use.
     fn current_model(&self) -> Option<ModelInfo> {
         let state = self.state.borrow();
@@ -1021,6 +1057,13 @@ impl App {
             ModelState::Downloading(None) => tr("Unpacking…"),
             ModelState::Loading => tr("Loading model…"),
             ModelState::NeedsKey => tr("Enter an API key below."),
+            ModelState::Ready if self.engine().is_some_and(|e| is_server_engine(&e)) => {
+                // Says where the audio goes, as the profile editor does.
+                tr_with(
+                    "Sends recordings to {server}.",
+                    &[("server", &self.server_url().unwrap_or_default())],
+                )
+            }
             ModelState::Ready if self.engine().is_some_and(|e| is_cloud(&e)) => {
                 tr(CLOUD_MODEL_SUMMARY)
             }
@@ -1078,7 +1121,7 @@ impl App {
         let engine = self.engine()?;
         let values = self.settings.borrow().plugin_values(&engine.manifest.id);
         values
-            .get(SELECTED_PLUGIN_MODEL)?
+            .get(model_setting(&engine))?
             .as_str()
             .map(str::to_owned)
     }
@@ -1089,7 +1132,7 @@ impl App {
         };
         let saved = self.settings.borrow_mut().set_plugin_value(
             &engine.manifest.id,
-            SELECTED_PLUGIN_MODEL,
+            model_setting(&engine),
             json!(model),
         );
         if let Err(error) = saved {
@@ -1233,6 +1276,91 @@ impl App {
             label.set_visible(!text.is_empty());
         }
     }
+}
+
+/// Saves the server profiles in the settings and hands a running
+/// OpenAI-compatible engine the change.
+struct ServerHost(std::rc::Weak<App>);
+
+impl server_profiles::Host for ServerHost {
+    fn save(&self, profiles: &Value) -> std::io::Result<()> {
+        let Some(app) = self.0.upgrade() else {
+            return Ok(());
+        };
+        let mut stored = app.settings.borrow_mut();
+        stored.set_plugin_value(
+            tw_openai_compatible::PLUGIN_ID,
+            server_profiles::PROFILES,
+            profiles.clone(),
+        )
+    }
+
+    fn changed(&self, _settings: &PluginSettings) {
+        let Some(app) = self.0.upgrade() else {
+            return;
+        };
+        let running = app.state.borrow().plugin.is_some();
+        if running && app.engine().is_some_and(|e| is_server_engine(&e)) {
+            glib::spawn_future_local(reconfigure(app));
+        }
+    }
+}
+
+/// Gives the running engine its changed settings and loads its model again.
+async fn reconfigure(app: Rc<App>) {
+    {
+        // A dictation in progress keeps its server; the change follows when it ends.
+        let mut state = app.state.borrow_mut();
+        if state.phase != Phase::Idle || state.busy {
+            state.reconfigure_pending = true;
+            return;
+        }
+        state.reconfigure_pending = false;
+        // A plugin that is starting again reads the profiles as it starts.
+        if state.plugin.is_none() {
+            return;
+        }
+    }
+    // Locks the pickers until the plugin has its settings, so that its answer
+    // cannot land on another engine.
+    app.set_model(ModelState::Loading);
+    match configure_plugin(&app).await {
+        Ok(true) if app.current_model().is_some() => load_model(app).await,
+        Ok(true) => app.set_model(ModelState::Unavailable(tr("No model loaded"))),
+        Ok(false) => app.set_model(ModelState::NeedsKey),
+        Err(error) => app.setup_failed(error),
+    }
+}
+
+/// Shows the server profiles when the OpenAI-compatible plugin is among the
+/// engines.
+fn show_server_profiles(app: &Rc<App>) {
+    let plugin = app
+        .state
+        .borrow()
+        .engines
+        .iter()
+        .find(|e| is_server_engine(e))
+        .cloned();
+    let Some(plugin) = plugin else {
+        return;
+    };
+    if app.state.borrow().server_profiles.is_some() {
+        return;
+    }
+    let values = app
+        .settings
+        .borrow()
+        .plugin_values(tw_openai_compatible::PLUGIN_ID);
+    let profiles = ServerProfiles::new(
+        &app.ui.servers,
+        &app.ui.window,
+        plugin,
+        &values,
+        ServerHost(Rc::downgrade(app)),
+    );
+    app.ui.servers.set_visible(true);
+    app.state.borrow_mut().server_profiles = Some(profiles);
 }
 
 fn shortcut_flag() -> Option<std::path::PathBuf> {
@@ -1380,6 +1508,7 @@ async fn find_engines(app: Rc<App>) -> bool {
         state.engines = engines;
         state.engine = Some(index);
     }
+    show_server_profiles(&app);
     app.refresh_pickers();
     app.refresh_model();
     true
@@ -1422,7 +1551,6 @@ async fn start_plugin(app: Rc<App>) {
                 .flatten()
                 .or_else(|| app.settings.borrow().string(settings::SELECTED_MODEL));
             let index = pick_model(&models, saved.as_deref());
-            let installed = index.is_some_and(|i| models[i].installed);
             {
                 let mut state = app.state.borrow_mut();
                 state.plugin = Some(Arc::new(Mutex::new(process)));
@@ -1438,6 +1566,12 @@ async fn start_plugin(app: Rc<App>) {
                     Err(error) => return app.setup_failed(error),
                 }
             }
+            // The settings may have brought the models, as for server profiles.
+            let (index, installed) = {
+                let state = app.state.borrow();
+                let index = state.model_index;
+                (index, index.is_some_and(|i| state.models[i].installed))
+            };
             match index {
                 Some(_) if installed => load_model(app).await,
                 Some(_) => app.set_model(ModelState::NotDownloaded),
@@ -1529,6 +1663,32 @@ fn engine_name(engine: Option<&InstalledPlugin>) -> String {
     engine.map(|e| e.manifest.name.clone()).unwrap_or_default()
 }
 
+/// The OpenAI-compatible engine, whose models are the user's server profiles.
+fn is_server_engine(engine: &InstalledPlugin) -> bool {
+    engine.manifest.id == tw_openai_compatible::PLUGIN_ID
+}
+
+/// The plugin setting that keeps the engine's model. For the OpenAI-compatible
+/// engine it is a profile, which the macOS plugin keeps elsewhere; its
+/// `selectedModel` means the default profile's transcription model there.
+fn model_setting(engine: &InstalledPlugin) -> &'static str {
+    if is_server_engine(engine) {
+        tw_openai_compatible::SELECTED_PROFILE
+    } else {
+        SELECTED_PLUGIN_MODEL
+    }
+}
+
+/// Who a failure is about, for the texts that explain it.
+#[derive(Clone)]
+struct Source {
+    /// The engine's name, or the server profile's for the OpenAI-compatible engine.
+    name: String,
+    /// The OpenAI-compatible engine: settings it misses belong in a profile,
+    /// not in an API key field.
+    server: bool,
+}
+
 fn keyring_failed(error: &SecretError) -> CallError {
     CallError::Failed(tr_with(
         "The keyring could not be read: {error}",
@@ -1554,9 +1714,14 @@ async fn configure_plugin(app: &Rc<App>) -> Result<bool, CallError> {
         return Ok(false);
     };
     let id = engine.manifest.id.clone();
+    let server_profiles = app.state.borrow().server_profiles.clone();
     // Only a cloud engine opens the keyring, so a local one never asks to unlock it.
     let mut secrets = std::collections::BTreeMap::new();
-    if is_cloud(&engine) {
+    if let Some(profiles) = server_profiles.filter(|_| is_server_engine(&engine)) {
+        // The profiles keep their own keys, one for each server.
+        profiles.load_keys().await;
+        secrets = profiles.plugin_settings().secrets;
+    } else if is_cloud(&engine) {
         let store = secret_store(app).await.map_err(|e| keyring_failed(&e))?;
         secrets = store.load_all(&id).await.map_err(|e| keyring_failed(&e))?;
         app.ui.api_key.show(
@@ -1568,15 +1733,26 @@ async fn configure_plugin(app: &Rc<App>) -> Result<bool, CallError> {
         values: app.settings.borrow().plugin_values(&id),
         secrets,
     };
-    let name = engine.manifest.name;
+    let source = app.source();
     let answer = gio::spawn_blocking(move || -> Result<Value, CallError> {
         let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
         process
             .configure(&settings)
-            .map_err(|e| CallError::from_plugin(e, &name))
+            .map_err(|e| CallError::from_plugin(e, &source))
     })
     .await
     .unwrap_or(Err(CallError::Lost))?;
+    if let Some(models) = answer["models"].as_array() {
+        let models: Vec<ModelInfo> = models.iter().filter_map(ModelInfo::from_json).collect();
+        let saved = app.plugin_model();
+        let index = pick_model(&models, saved.as_deref());
+        {
+            let mut state = app.state.borrow_mut();
+            state.models = models;
+            state.model_index = index;
+        }
+        app.refresh_pickers();
+    }
     Ok(answer["configured"].as_bool().unwrap_or(true))
 }
 
@@ -1618,6 +1794,8 @@ async fn save_api_key(app: Rc<App>, key: Option<String>) {
         start_plugin(app).await;
         return;
     }
+    // Locks the pickers until the plugin has the key, as in `reconfigure`.
+    app.set_model(ModelState::Loading);
     match configure_plugin(&app).await {
         Ok(true) => load_model(app).await,
         Ok(false) => app.set_model(ModelState::NeedsKey),
@@ -1627,14 +1805,14 @@ async fn save_api_key(app: Rc<App>, key: Option<String>) {
 
 fn call_plugin(
     plugin: &Arc<Mutex<PluginProcess>>,
-    engine: &str,
+    source: &Source,
     method: &str,
     params: Value,
 ) -> Result<Value, CallError> {
     let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
     process
         .call(method, params, &mut |_, _| {})
-        .map_err(|e| CallError::from_plugin(e, engine))
+        .map_err(|e| CallError::from_plugin(e, source))
 }
 
 async fn load_model(app: Rc<App>) {
@@ -1645,11 +1823,11 @@ async fn load_model(app: Rc<App>) {
         return;
     };
     app.set_model(ModelState::Loading);
-    let engine = engine_name(app.engine().as_ref());
+    let source = app.source();
     let loaded = gio::spawn_blocking(move || {
         call_plugin(
             &plugin,
-            &engine,
+            &source,
             "transcription.loadModel",
             json!({"modelId": model.id, "threads": 4}),
         )
@@ -1691,7 +1869,7 @@ async fn download_model(app: Rc<App>) {
         }
     }
     app.set_model(ModelState::Downloading(Some(0.0)));
-    let engine = engine_name(app.engine().as_ref());
+    let source = app.source();
     let (progress_tx, progress_rx) = async_channel::unbounded::<Option<f64>>();
     glib::spawn_future_local(glib::clone!(
         #[strong]
@@ -1722,7 +1900,7 @@ async fn download_model(app: Rc<App>) {
                     let _ = progress_tx.send_blocking(progress);
                 },
             )
-            .map_err(|e| CallError::from_plugin(e, &engine))
+            .map_err(|e| CallError::from_plugin(e, &source))
     })
     .await
     .unwrap_or(Err(CallError::Lost));
@@ -1808,7 +1986,7 @@ fn stop_recording(app: Rc<App>) {
     };
     app.set_phase(Phase::Transcribing);
     app.indicator("processing", &tr("Transcribing…"));
-    let engine = engine_name(app.engine().as_ref());
+    let source = app.source();
     glib::spawn_future_local(async move {
         let transcribed = gio::spawn_blocking(move || -> Result<String, CallError> {
             let samples = recorder.stop().map_err(CallError::Failed)?;
@@ -1820,7 +1998,7 @@ fn stop_recording(app: Rc<App>) {
             let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
             let result = process
                 .transcribe(&samples, None)
-                .map_err(|e| CallError::from_plugin(e, &engine))?;
+                .map_err(|e| CallError::from_plugin(e, &source))?;
             Ok(result["text"].as_str().unwrap_or_default().to_owned())
         })
         .await
@@ -1900,6 +2078,9 @@ fn stop_recording(app: Rc<App>) {
         };
         app.state.borrow_mut().busy = false;
         app.set_phase(Phase::Idle);
+        if std::mem::take(&mut app.state.borrow_mut().reconfigure_pending) {
+            glib::spawn_future_local(reconfigure(Rc::clone(&app)));
+        }
         match outcome {
             Ok(()) => app.indicator_feedback("inserting", &tr("Inserted"), INSERTED_FEEDBACK),
             Err(error) => app.dictation_failed(&error),
@@ -1920,16 +2101,19 @@ enum CallError {
 impl CallError {
     /// Sorts a plugin error; a failure the service reports is explained in
     /// the app's words with the engine's name.
-    fn from_plugin(error: PluginError, engine: &str) -> Self {
+    fn from_plugin(error: PluginError, source: &Source) -> Self {
         match error {
             PluginError::Io(_) | PluginError::Protocol(_) | PluginError::TimedOut(_) => {
                 CallError::Lost
+            }
+            other if source.server => {
+                CallError::Failed(server_profiles::explain(&other, &source.name))
             }
             PluginError::Plugin {
                 kind: Some(ref kind),
                 ..
             } if kind == error_kind::NOT_CONFIGURED => CallError::NeedsKey,
-            other => CallError::Failed(cloud::explain(&other, engine)),
+            other => CallError::Failed(cloud::explain(&other, &source.name)),
         }
     }
 }

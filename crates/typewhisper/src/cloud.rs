@@ -23,10 +23,18 @@ pub fn explain(error: &PluginError, engine: &str) -> String {
     let PluginError::Plugin {
         kind: Some(kind),
         message,
+        detail,
         ..
     } = error
     else {
         return error.to_string();
+    };
+    // A server's own reason, such as "Unsupported Media Type", says more than
+    // the general text.
+    let with_detail = |text: &str| {
+        detail
+            .as_deref()
+            .map(|detail| tr_with(text, &[("engine", engine), ("detail", detail)]))
     };
     let text = match kind.as_str() {
         error_kind::NOT_CONFIGURED => return tr("An API key is required for transcription."),
@@ -35,14 +43,29 @@ pub fn explain(error: &PluginError, engine: &str) -> String {
         }
         error_kind::PERMISSION => n_("This {engine} key does not have permission for the request."),
         error_kind::RATE_LIMIT => n_("{engine} rate limit reached. Wait and try again."),
-        error_kind::NETWORK => n_("Could not reach {engine}. Check your internet connection."),
+        error_kind::NETWORK => {
+            if let Some(text) = with_detail(n_("Could not reach {engine}: {detail}")) {
+                return text;
+            }
+            n_("Could not reach {engine}. Check your internet connection.")
+        }
         error_kind::TIMEOUT => n_("{engine} timed out. Try again."),
         error_kind::REQUEST_TOO_LARGE => {
             n_("Recording exceeds {engine}'s upload limit. Use a shorter recording.")
         }
         error_kind::INVALID_REQUEST | error_kind::SERVER => {
+            if let Some(text) = with_detail(n_("{engine} could not complete the request: {detail}"))
+            {
+                return text;
+            }
             n_("{engine} could not complete the request. Check the selected model and try again.")
         }
+        error_kind::KEY_WITHHELD => n_(
+            "{engine} requires the API key, but the key is sent only over HTTPS or to this \
+             computer. Use an HTTPS server URL.",
+        ),
+        error_kind::OUTPUT_TRUNCATED => n_("{engine} stopped its answer at its token limit."),
+        error_kind::EMPTY_RESPONSE => n_("{engine} answered without any text."),
         _ => return message.clone(),
     };
     tr_with(text, &[("engine", engine)])
@@ -126,6 +149,7 @@ mod tests {
             code: -32020,
             message: message.into(),
             kind: kind.map(str::to_owned),
+            detail: None,
         }
     }
 
@@ -150,6 +174,29 @@ mod tests {
                 "Groq could not complete the request. Check the selected model and try again."
             );
         }
+    }
+
+    #[test]
+    fn passes_on_the_servers_reason_and_the_key_rule() {
+        let refused = PluginError::Plugin {
+            code: -32020,
+            message: "API error 415: Unsupported Media Type".into(),
+            kind: Some(error_kind::INVALID_REQUEST.into()),
+            detail: Some("Unsupported Media Type".into()),
+        };
+        assert_eq!(
+            explain(&refused, "LM Studio"),
+            "LM Studio could not complete the request: Unsupported Media Type"
+        );
+        assert_eq!(
+            explain(&failed(Some(error_kind::KEY_WITHHELD), "x"), "LM Studio"),
+            "LM Studio requires the API key, but the key is sent only over HTTPS or to this \
+             computer. Use an HTTPS server URL."
+        );
+        assert_eq!(
+            explain(&failed(Some(error_kind::OUTPUT_TRUNCATED), "x"), "Local"),
+            "Local stopped its answer at its token limit."
+        );
     }
 
     #[test]

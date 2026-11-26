@@ -1,0 +1,11 @@
+{
+  "id": "com.typewhisper.openai-compatible",
+  "name": "OpenAI Compatible",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "minHostVersion": "0.1.0",
+  "executable": "bin/tw-plugin-openai-compatible",
+  "categories": ["transcription", "llm"],
+  "locality": "configurable",
+  "architectures": ["x64", "arm64"]
+}

@@ -77,7 +77,7 @@ msgid "{model} (English)"
 msgstr "{model} (inglés)"
 
 #. Leave {error} as it is.
-#: crates/typewhisper/src/app.rs
+#: crates/typewhisper/src/app.rs crates/typewhisper/src/server_profiles.rs
 msgid "The setting could not be saved: {error}"
 msgstr "No se pudo guardar el ajuste: {error}"
 
@@ -183,6 +183,10 @@ msgid "Output Formatting"
 msgstr "Formato del texto de salida"
 
 #: crates/typewhisper/src/app.rs
+msgid "Servers with OpenAI's API, such as LM Studio, Ollama, vLLM or a cloud service. Each profile has its own URL, API key and models."
+msgstr "Servidores con la API de OpenAI, como LM Studio, Ollama, vLLM o un servicio en la nube. Cada perfil tiene su propia URL, clave de API y modelos."
+
+#: crates/typewhisper/src/app.rs
 msgid "About TypeWhisper"
 msgstr "Acerca de TypeWhisper"
 
@@ -243,6 +247,11 @@ msgstr "Cargando modelo…"
 #: crates/typewhisper/src/app.rs
 msgid "Enter an API key below."
 msgstr "Introduce una clave de API abajo."
+
+#. Leave {server} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "Sends recordings to {server}."
+msgstr "Envía las grabaciones a {server}."
 
 #: crates/typewhisper/src/app.rs
 msgid "Restart"
@@ -393,6 +402,11 @@ msgstr "Esta clave de {engine} no tiene permiso para la solicitud."
 msgid "{engine} rate limit reached. Wait and try again."
 msgstr "Se alcanzó el límite de solicitudes de {engine}. Espera y vuelve a intentarlo."
 
+#. Leave {detail} and {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Could not reach {engine}: {detail}"
+msgstr "No se pudo conectar con {engine}: {detail}"
+
 #. Leave {engine} as it is.
 #: crates/typewhisper/src/cloud.rs
 msgid "Could not reach {engine}. Check your internet connection."
@@ -408,18 +422,351 @@ msgstr "{engine} no respondió a tiempo. Vuelve a intentarlo."
 msgid "Recording exceeds {engine}'s upload limit. Use a shorter recording."
 msgstr "La grabación supera el límite de subida de {engine}. Usa una grabación más corta."
 
+#. Leave {detail} and {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} could not complete the request: {detail}"
+msgstr "{engine} no pudo completar la solicitud: {detail}"
+
 #. Leave {engine} as it is.
 #: crates/typewhisper/src/cloud.rs
 msgid "{engine} could not complete the request. Check the selected model and try again."
 msgstr "{engine} no pudo completar la solicitud. Comprueba el modelo seleccionado y vuelve a intentarlo."
 
+#. Leave {engine} as it is.
 #: crates/typewhisper/src/cloud.rs
+msgid "{engine} requires the API key, but the key is sent only over HTTPS or to this computer. Use an HTTPS server URL."
+msgstr "{engine} necesita la clave de API, pero solo se envía por HTTPS o a este equipo. Usa una URL del servidor con HTTPS."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} stopped its answer at its token limit."
+msgstr "{engine} cortó la respuesta en el límite de tokens."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} answered without any text."
+msgstr "{engine} respondió sin texto."
+
+#: crates/typewhisper/src/cloud.rs crates/typewhisper/src/server_profiles.rs
 msgid "API Key"
 msgstr "Clave de API"
 
-#: crates/typewhisper/src/cloud.rs
+#: crates/typewhisper/src/cloud.rs crates/typewhisper/src/server_profiles.rs
 msgid "Remove API key"
 msgstr "Quitar clave de API"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Custom Server"
+msgstr "Servidor personalizado"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Add Profile"
+msgstr "Agregar perfil"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Not set up"
+msgstr "Sin configurar"
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The API key could not be saved: {error}"
+msgstr "No se pudo guardar la clave de API: {error}"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Models"
+msgstr "Modelos"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Profile Name"
+msgstr "Nombre del perfil"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Server URL"
+msgstr "URL del servidor"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Saved"
+msgstr "Guardada"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "This server gets no API key: keys are sent only over HTTPS or to this computer."
+msgstr "Este servidor no recibe la clave de API: las claves solo se envían por HTTPS o a este equipo."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "API Version (optional)"
+msgstr "Versión de la API (opcional)"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Test Connection"
+msgstr "Probar conexión"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Connection"
+msgstr "Conexión"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "For example http://localhost:1234 for LM Studio or http://localhost:11434 for Ollama; a trailing /v1 is optional. The API key is optional for local servers. It is sent only over HTTPS or to this computer."
+msgstr "Por ejemplo, http://localhost:1234 para LM Studio o http://localhost:11434 para Ollama; el /v1 final es opcional. La clave de API es opcional para servidores locales. Solo se envía por HTTPS o a este equipo."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Auto"
+msgstr "Auto"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Transcription Model"
+msgstr "Modelo de transcripción"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Transcription Transport"
+msgstr "Transporte de la transcripción"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Auto uses Realtime for gpt-live-transcribe and gpt-realtime-whisper, Batch for other models."
+msgstr "Auto usa En tiempo real para gpt-live-transcribe y gpt-realtime-whisper, y Por lotes para los demás modelos."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Batch"
+msgstr "Por lotes"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Realtime"
+msgstr "En tiempo real"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Realtime Protocol"
+msgstr "Protocolo en tiempo real"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "For a deployment alias, the model family behind it."
+msgstr "Para un alias de implementación, la familia de modelos que hay detrás."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Batch Transcription Endpoint"
+msgstr "Endpoint de transcripción por lotes"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Deployment-scoped needs a dated API version."
+msgstr "Por implementación requiere una versión de API con fecha."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Standard v1"
+msgstr "Estándar v1"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Deployment-scoped"
+msgstr "Por implementación"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Refresh Models"
+msgstr "Actualizar modelos"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Transcription"
+msgstr "Transcripción"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "When this profile is the engine, recorded audio is sent to this server for transcription."
+msgstr "Cuando este perfil es el motor, el audio grabado se envía a este servidor para transcribirlo."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Default"
+msgstr "Predeterminado del proveedor"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "LLM Model"
+msgstr "Modelo LLM"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "LLM API"
+msgstr "API del LLM"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Choose the API supported by your server."
+msgstr "Elige la API que admite tu servidor."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Reasoning Effort"
+msgstr "Esfuerzo de razonamiento"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Default omits reasoning. Other values send reasoning: { effort: ... } to /v1/responses."
+msgstr "Predeterminado del proveedor omite reasoning. Los demás valores envían reasoning: { effort: ... } a /v1/responses."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Low"
+msgstr "Bajo"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Medium"
+msgstr "Medio"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "High"
+msgstr "Alto"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "X High"
+msgstr "Muy alto"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Max"
+msgstr "Máximo"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Temperature"
+msgstr "Temperatura"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Default sends no temperature override."
+msgstr "Predeterminado del proveedor no envía ninguna temperatura propia."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Custom"
+msgstr "Personalizado"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Temperature Value"
+msgstr "Valor de temperatura"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "From 0 to 2. Lower values give more consistent results."
+msgstr "De 0 a 2. Los valores bajos dan resultados más uniformes."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Provider Thinking Extension"
+msgstr "Extensión de razonamiento del proveedor"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Uses reasoning_effort for DeepInfra and thinking.type for other compatible servers. Leave off unless your provider documents support."
+msgstr "Usa reasoning_effort para DeepInfra y thinking.type para otros servidores compatibles. Déjala desactivada si tu proveedor no documenta que la admite."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "LLM Request Timeout"
+msgstr "Tiempo de espera de las solicitudes al LLM"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Seconds, from 5 to 3600. Local models may need more time."
+msgstr "Segundos, de 5 a 3600. Los modelos locales pueden necesitar más tiempo."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Send Test Prompt"
+msgstr "Enviar solicitud de prueba"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Language Model"
+msgstr "Modelo de lenguaje"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "For text processing. The test prompt sends a short question to the LLM model above."
+msgstr "Para procesar texto. La solicitud de prueba envía una pregunta corta al modelo LLM de arriba."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Delete Profile"
+msgstr "Eliminar perfil"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Cancel"
+msgstr "Cancelar"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Save"
+msgstr "Guardar"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "New Profile"
+msgstr "Perfil nuevo"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter the server URL first."
+msgstr "Primero introduce la URL del servidor."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Connection verified without the API key: it is sent only over HTTPS or to this computer."
+msgstr "Conexión verificada sin la clave de API: solo se envía por HTTPS o a este equipo."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Connection verified."
+msgstr "Conexión verificada."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "No models returned. You can enter model IDs manually."
+msgstr "No se recibieron modelos. Puedes introducir los ID de modelo a mano."
+
+#. Leave {count} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "{count} models found. Choose models and save the profile."
+msgstr "Se encontraron {count} modelos. Elige los modelos y guarda el perfil."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter an LLM model first."
+msgstr "Primero introduce un modelo LLM."
+
+#. Leave {model} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Answer from {model}"
+msgstr "Respuesta de {model}"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Discard Changes?"
+msgstr "¿Descartar los cambios?"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The changes to this profile are not saved."
+msgstr "Los cambios de este perfil no se han guardado."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Keep Editing"
+msgstr "Seguir editando"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Discard"
+msgstr "Descartar"
+
+#. Leave {name} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Delete “{name}”?"
+msgstr "¿Eliminar «{name}»?"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The profile and its saved API key are removed."
+msgstr "Se eliminan el perfil y su clave de API guardada."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Delete"
+msgstr "Eliminar"
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter a server URL that starts with http:// or https://."
+msgstr "Introduce una URL del servidor que empiece por http:// o https://."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Remove the user name and password from the server URL. Use the API key field."
+msgstr "Quita el usuario y la contraseña de la URL del servidor. Usa el campo de la clave de API."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Remove the part after ? or # from the server URL. The API version has its own field."
+msgstr "Quita la parte que sigue a ? o # de la URL del servidor. La versión de la API tiene su propio campo."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The server URL is invalid."
+msgstr "La URL del servidor no es válida."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Enter a profile name."
+msgstr "Introduce un nombre de perfil."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "Deployment-scoped batch transcription requires a dated API version, such as 2025-03-01-preview."
+msgstr "La transcripción por lotes por implementación requiere una versión de API con fecha, como 2025-03-01-preview."
+
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The server profile is not complete. Enter its server URL and transcription model."
+msgstr "El perfil del servidor no está completo. Introduce su URL del servidor y su modelo de transcripción."
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/server_profiles.rs
+msgid "The OpenAI-compatible plugin stopped: {error}"
+msgstr "El plugin compatible con OpenAI se detuvo: {error}"
 
 #: crates/typewhisper/src/terminals.rs
 msgid "TypeWhisper pastes dictations into terminal apps with Ctrl+Shift+V, because terminals pass Ctrl+V on to the program running in them. GNOME Terminal, Ptyxis, Console, Konsole, Alacritty, kitty, WezTerm, foot, Ghostty and other well-known terminals are always included. Add another terminal if dictating into it pastes nothing."

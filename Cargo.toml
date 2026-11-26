@@ -21,6 +21,7 @@ tw-plugin-protocol = { path = "crates/tw-plugin-protocol" }
 tw-plugin-host = { path = "crates/tw-plugin-host" }
 tw-platform = { path = "crates/tw-platform" }
 tw-openai-transcription = { path = "crates/tw-openai-transcription" }
+tw-openai-compatible = { path = "crates/tw-openai-compatible" }
 
 [profile.release]
 lto = "thin"
