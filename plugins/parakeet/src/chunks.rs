@@ -29,8 +29,17 @@ pub fn transcribe(samples: &[f32], mut recognize: impl FnMut(&[f32]) -> String) 
         );
     }
     let mut transcript = String::new();
+    // Only neighbouring chunks share audio. After a chunk without text, the
+    // transcript ends with an earlier one, so nothing of it may count as overlap.
+    let mut previous_had_text = false;
     for range in ranges {
-        transcript = merge(&transcript, &recognize(&samples[range]));
+        let text = recognize(&samples[range]);
+        transcript = if previous_had_text {
+            merge(&transcript, &text)
+        } else {
+            join(&transcript, &text)
+        };
+        previous_had_text = !text.trim().is_empty();
     }
     transcript
 }
@@ -80,6 +89,19 @@ fn merge(transcript: &str, next: &str) -> String {
         if (0..overlap).all(|i| ending[start + i].normalized == starting[i].normalized) {
             return append(transcript, &next[starting[overlap - 1].end..]);
         }
+    }
+    append(transcript, next)
+}
+
+/// Appends `next` without looking for an overlap.
+fn join(transcript: &str, next: &str) -> String {
+    let transcript = transcript.trim();
+    let next = next.trim();
+    if transcript.is_empty() {
+        return next.to_owned();
+    }
+    if next.is_empty() {
+        return transcript.to_owned();
     }
     append(transcript, next)
 }
@@ -262,6 +284,15 @@ mod tests {
         });
         assert_eq!(lengths, [2_920_000, 2_920_000]);
         assert_eq!(text, "We went to the market on Monday and bought apples.");
+    }
+
+    #[test]
+    fn a_chunk_without_text_stops_the_overlap_search() {
+        // 600 s: three chunks; the first and the third share no audio.
+        let samples = vec![0.0; 600 * SECOND];
+        let mut results = ["thank you", "", "thank you for listening"].into_iter();
+        let text = transcribe(&samples, |_| results.next().unwrap().to_owned());
+        assert_eq!(text, "thank you thank you for listening");
     }
 
     #[test]
