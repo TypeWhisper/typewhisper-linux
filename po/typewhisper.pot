@@ -76,6 +76,11 @@ msgstr ""
 msgid "Source Code"
 msgstr ""
 
+#. Leave {license} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "Licensed under {license}. TypeWhisper uses the int8 ONNX conversion from sherpa-onnx."
+msgstr ""
+
 #: crates/typewhisper/src/app.rs
 msgid "Keyboard and Clipboard Access"
 msgstr ""
