@@ -1,6 +1,6 @@
 [package]
 name = "tw-platform"
-description = "Linux desktop services for TypeWhisper: audio capture, global shortcuts, text insertion"
+description = "Linux desktop services for TypeWhisper: audio capture, global shortcuts, text insertion, secrets"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,5 +17,7 @@ async-channel = "2"
 async-io = "2"
 futures-util = "0.3"
 wl-clipboard-rs = "0.9.5"
+# The Secret Service on the desktop, the Secret portal inside Flatpak.
+oo7 = { version = "0.7.3", default-features = false, features = ["async-std", "native_crypto"] }
 # The C library's gettext; glibc has it built in.
 gettext-rs = { version = "0.8", features = ["gettext-system"] }

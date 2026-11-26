@@ -1,4 +1,5 @@
 mod app;
+mod cloud;
 mod formatting;
 mod kwin_script;
 mod overlay;

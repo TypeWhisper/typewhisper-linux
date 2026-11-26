@@ -25,12 +25,14 @@ terminals that show up in AT-SPI.
 | Path | Contents |
 | --- | --- |
 | `crates/typewhisper` | The GTK 4 and libadwaita app, the indicator overlay on KDE Plasma and other compositors with wlr-layer-shell, and the KWin script that reports the focused app |
-| `crates/tw-platform` | Desktop services: microphone capture, global shortcut, pasting through the portals |
+| `crates/tw-platform` | Desktop services: microphone capture, global shortcut, pasting through the portals, plugin secrets in the desktop's keyring |
 | `crates/tw-formats` | Formats shared with the macOS, Windows and iOS apps, with conformance tests against fixtures written by the Mac app |
 | `crates/tw-plugin-protocol` | Wire protocol between the app and plugin processes |
 | `crates/tw-plugin-host` | Finds installed plugins, starts them and calls them |
+| `crates/tw-openai-transcription` | Speech to text over OpenAI-style `/audio/transcriptions` endpoints, shared by the cloud plugins |
 | `plugins/parakeet` | NVIDIA Parakeet through sherpa-onnx, as a plugin process |
 | `plugins/whisper-cpp` | OpenAI Whisper through whisper.cpp, as a plugin process |
+| `plugins/groq` | Groq's hosted Whisper models, as a plugin process |
 | `gnome-shell-extension` | Indicator overlay and focused-app reporting on GNOME |
 | `packaging` | Flatpak manifest, desktop file, AppStream metadata |
 | `tools` | Headless VM sessions, probes for portal behaviour, Flatpak helpers |
@@ -62,6 +64,11 @@ crash cannot take the app down. Plugins will come from the in-app catalog, as
 Flatpak extensions (`com.typewhisper.TypeWhisper.Plugin.*`) and as `.deb`/`.rpm`
 packages.
 
+A plugin that needs settings, such as the API key of a cloud service, gets them
+from the app over the same connection and stores nothing itself. The app keeps
+the keys in the desktop's keyring: GNOME Keyring or KWallet through the Secret
+Service, and inside Flatpak a keyring file that the Secret portal unlocks.
+
 ## Build
 
 Fedora:
@@ -87,11 +94,12 @@ target/release/typewhisper
 ```
 
 The script builds the release, installs a `.desktop` file that points at it and
-copies the Parakeet and Whisper plugins to `~/.local/share/typewhisper/plugins`.
+copies the Parakeet, Whisper and Groq plugins to `~/.local/share/typewhisper/plugins`.
 The desktop portals refuse an app ID without a matching `.desktop` file. In the
 window, set up the shortcut, allow typing (on GNOME, switch on "Allow Remote
 Interaction" in the dialog) and download the speech model. Under Engine, pick
-Whisper and one of its models to dictate with it instead of Parakeet.
+Whisper and one of its models to dictate with it instead of Parakeet, or Groq
+with your Groq API key.
 
 Flatpak:
 

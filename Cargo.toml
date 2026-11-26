@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/TypeWhisper/typewhisper-linux"
-rust-version = "1.92"
+rust-version = "1.95"
 publish = false
 
 [workspace.dependencies]
@@ -20,6 +20,7 @@ libpulse-simple-binding = "2"
 tw-plugin-protocol = { path = "crates/tw-plugin-protocol" }
 tw-plugin-host = { path = "crates/tw-plugin-host" }
 tw-platform = { path = "crates/tw-platform" }
+tw-openai-transcription = { path = "crates/tw-openai-transcription" }
 
 [profile.release]
 lto = "thin"

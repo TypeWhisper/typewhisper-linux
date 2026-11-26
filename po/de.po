@@ -67,6 +67,10 @@ msgstr "Diktat starten und beenden"
 msgid "Runs offline with no API key."
 msgstr "Läuft offline ohne API-Key."
 
+#: crates/typewhisper/src/app.rs
+msgid "Runs in the cloud with your API key."
+msgstr "Läuft in der Cloud mit deinem API-Schlüssel."
+
 #. Leave {model} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "{model} (English)"
@@ -237,8 +241,16 @@ msgid "Loading model…"
 msgstr "Modell wird geladen …"
 
 #: crates/typewhisper/src/app.rs
+msgid "Enter an API key below."
+msgstr "Gib unten einen API-Schlüssel ein."
+
+#: crates/typewhisper/src/app.rs
 msgid "Restart"
 msgstr "Neu starten"
+
+#: crates/typewhisper/src/app.rs
+msgid "Try Again"
+msgstr "Erneut versuchen"
 
 #: crates/typewhisper/src/app.rs
 msgid "No connection to the desktop"
@@ -284,6 +296,15 @@ msgstr "Bevor du diktieren kannst, muss noch ein Sprachmodell heruntergeladen we
 msgid "The speech model stopped unexpectedly. Restart it below."
 msgstr "Das Sprachmodell wurde unerwartet beendet. Starte es unten neu."
 
+#: crates/typewhisper/src/app.rs
+msgid "API key required"
+msgstr "API-Key erforderlich"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "An API key for {engine} still needs to be entered below before dictation can run."
+msgstr "Bevor du diktieren kannst, muss unten noch ein API-Schlüssel für {engine} eingegeben werden."
+
 #. Leave {key} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "Press {key} in any app to begin."
@@ -306,9 +327,31 @@ msgstr "Das Parakeet-Plugin ist nicht installiert."
 msgid "The plugin host crashed."
 msgstr "Der Plugin-Host ist abgestürzt."
 
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The keyring could not be read: {error}"
+msgstr "Der Schlüsselbund konnte nicht gelesen werden: {error}"
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The API key could not be saved in the keyring: {error}"
+msgstr "Der API-Schlüssel konnte nicht im Schlüsselbund gespeichert werden: {error}"
+
+#: crates/typewhisper/src/app.rs
+msgid "API key saved."
+msgstr "API-Schlüssel gespeichert."
+
+#: crates/typewhisper/src/app.rs
+msgid "API key removed."
+msgstr "API-Schlüssel entfernt."
+
 #: crates/typewhisper/src/app.rs
 msgid "Still working on the last dictation."
 msgstr "Das letzte Diktat wird noch verarbeitet."
+
+#: crates/typewhisper/src/app.rs crates/typewhisper/src/cloud.rs
+msgid "An API key is required for transcription."
+msgstr "Für die Transkription ist ein API-Schlüssel erforderlich."
 
 #: crates/typewhisper/src/app.rs
 msgid "The speech model is not loaded."
@@ -329,6 +372,54 @@ msgstr "Das Sprachmodell wurde beendet. Es wird neu gestartet …"
 #: crates/typewhisper/src/app.rs
 msgid "Inserted"
 msgstr "Eingefügt"
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "When {engine} is the selected engine, recorded audio is sent to {engine} for transcription. The API key is stored in the desktop's keyring."
+msgstr "Wenn {engine} als Engine ausgewählt ist, wird aufgenommenes Audio zur Transkription an {engine} gesendet. Der API-Schlüssel wird im Schlüsselbund des Desktops gespeichert."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rejected the API key. Replace it in the TypeWhisper window."
+msgstr "{engine} hat den API-Schlüssel abgelehnt. Ersetze ihn im TypeWhisper-Fenster."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "This {engine} key does not have permission for the request."
+msgstr "Dieser {engine}-Schlüssel hat keine Berechtigung für die Anfrage."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rate limit reached. Wait and try again."
+msgstr "{engine}-Ratenlimit erreicht. Warte kurz und versuche es erneut."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Could not reach {engine}. Check your internet connection."
+msgstr "{engine} ist nicht erreichbar. Prüfe deine Internetverbindung."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} timed out. Try again."
+msgstr "Zeitüberschreitung bei {engine}. Versuche es erneut."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Recording exceeds {engine}'s upload limit. Use a shorter recording."
+msgstr "Die Aufnahme überschreitet das Upload-Limit von {engine}. Verwende eine kürzere Aufnahme."
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} could not complete the request. Check the selected model and try again."
+msgstr "{engine} konnte die Anfrage nicht abschließen. Prüfe das ausgewählte Modell und versuche es erneut."
+
+#: crates/typewhisper/src/cloud.rs
+msgid "API Key"
+msgstr "API-Schlüssel"
+
+#: crates/typewhisper/src/cloud.rs
+msgid "Remove API key"
+msgstr "API-Schlüssel entfernen"
 
 #: crates/typewhisper/src/terminals.rs
 msgid "TypeWhisper pastes dictations into terminal apps with Ctrl+Shift+V, because terminals pass Ctrl+V on to the program running in them. GNOME Terminal, Ptyxis, Console, Konsole, Alacritty, kitty, WezTerm, foot, Ghostty and other well-known terminals are always included. Add another terminal if dictating into it pastes nothing."

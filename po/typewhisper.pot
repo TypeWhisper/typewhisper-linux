@@ -67,6 +67,10 @@ msgstr ""
 msgid "Runs offline with no API key."
 msgstr ""
 
+#: crates/typewhisper/src/app.rs
+msgid "Runs in the cloud with your API key."
+msgstr ""
+
 #. Leave {model} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "{model} (English)"
@@ -237,7 +241,15 @@ msgid "Loading model…"
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
+msgid "Enter an API key below."
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
 msgid "Restart"
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
+msgid "Try Again"
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
@@ -284,6 +296,15 @@ msgstr ""
 msgid "The speech model stopped unexpectedly. Restart it below."
 msgstr ""
 
+#: crates/typewhisper/src/app.rs
+msgid "API key required"
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "An API key for {engine} still needs to be entered below before dictation can run."
+msgstr ""
+
 #. Leave {key} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "Press {key} in any app to begin."
@@ -306,8 +327,30 @@ msgstr ""
 msgid "The plugin host crashed."
 msgstr ""
 
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The keyring could not be read: {error}"
+msgstr ""
+
+#. Leave {error} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "The API key could not be saved in the keyring: {error}"
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
+msgid "API key saved."
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
+msgid "API key removed."
+msgstr ""
+
 #: crates/typewhisper/src/app.rs
 msgid "Still working on the last dictation."
+msgstr ""
+
+#: crates/typewhisper/src/app.rs crates/typewhisper/src/cloud.rs
+msgid "An API key is required for transcription."
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
@@ -328,6 +371,54 @@ msgstr ""
 
 #: crates/typewhisper/src/app.rs
 msgid "Inserted"
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "When {engine} is the selected engine, recorded audio is sent to {engine} for transcription. The API key is stored in the desktop's keyring."
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rejected the API key. Replace it in the TypeWhisper window."
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "This {engine} key does not have permission for the request."
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} rate limit reached. Wait and try again."
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Could not reach {engine}. Check your internet connection."
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} timed out. Try again."
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "Recording exceeds {engine}'s upload limit. Use a shorter recording."
+msgstr ""
+
+#. Leave {engine} as it is.
+#: crates/typewhisper/src/cloud.rs
+msgid "{engine} could not complete the request. Check the selected model and try again."
+msgstr ""
+
+#: crates/typewhisper/src/cloud.rs
+msgid "API Key"
+msgstr ""
+
+#: crates/typewhisper/src/cloud.rs
+msgid "Remove API key"
 msgstr ""
 
 #: crates/typewhisper/src/terminals.rs

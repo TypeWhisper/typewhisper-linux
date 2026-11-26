@@ -9,6 +9,7 @@ pub mod data_control;
 pub mod i18n;
 pub mod insert;
 pub mod portal;
+pub mod secrets;
 pub mod settings;
 pub mod shortcuts;
 
