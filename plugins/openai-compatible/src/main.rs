@@ -150,8 +150,18 @@ impl Plugin {
                     .values
                     .get(SELECTED_PROFILE)
                     .and_then(Value::as_str);
-                if let Some(id) = saved.filter(|id| self.profiles().get(id).is_some()) {
+                let profiles = self.profiles();
+                if let Some(id) = saved.filter(|id| profiles.get(id).is_some()) {
                     self.selected = id.to_owned();
+                } else if profiles.get(&self.selected).is_none() {
+                    // The chosen profile was deleted: the default one takes
+                    // over, which cannot be deleted.
+                    let fallback = profiles
+                        .get(DEFAULT_PROFILE_ID)
+                        .or_else(|| profiles.iter().next());
+                    if let Some(profile) = fallback {
+                        self.selected = profile.id.clone();
+                    }
                 }
                 let configured = self
                     .profiles()
@@ -402,10 +412,21 @@ mod tests {
             .unwrap();
         assert_eq!(configured["configured"], true);
         assert_eq!(plugin.selected, "openai-compatible-b");
-        // A saved ID without a profile leaves the choice alone.
+        // A saved ID without a profile leaves a choice that still exists alone.
         let configured = plugin.handle(SETTINGS_UPDATE, &settings("gone")).unwrap();
         assert_eq!(configured["configured"], true);
         assert_eq!(plugin.selected, "openai-compatible-b");
+
+        // Deleting the chosen profile hands the choice to the default one.
+        let only_default = json!({"values": {
+            "profiles": [
+                {"id": "openai-compatible", "name": "Local", "baseURL": "http://localhost:8000", "selectedModelId": "whisper-1"}
+            ],
+            "selectedProfileId": "openai-compatible-b"
+        }});
+        let configured = plugin.handle(SETTINGS_UPDATE, &only_default).unwrap();
+        assert_eq!(configured["configured"], true);
+        assert_eq!(plugin.selected, DEFAULT_PROFILE_ID);
     }
 
     #[test]

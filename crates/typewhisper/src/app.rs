@@ -1321,6 +1321,9 @@ async fn reconfigure(app: Rc<App>) {
             return;
         }
     }
+    // Locks the pickers until the plugin has its settings, so that its answer
+    // cannot land on another engine.
+    app.set_model(ModelState::Loading);
     match configure_plugin(&app).await {
         Ok(true) if app.current_model().is_some() => load_model(app).await,
         Ok(true) => app.set_model(ModelState::Unavailable(tr("No model loaded"))),
@@ -1791,6 +1794,8 @@ async fn save_api_key(app: Rc<App>, key: Option<String>) {
         start_plugin(app).await;
         return;
     }
+    // Locks the pickers until the plugin has the key, as in `reconfigure`.
+    app.set_model(ModelState::Loading);
     match configure_plugin(&app).await {
         Ok(true) => load_model(app).await,
         Ok(false) => app.set_model(ModelState::NeedsKey),

@@ -110,25 +110,32 @@ impl ServerProfiles {
         Editor::open(&self, profile, is_new);
     }
 
-    /// Reads the keys from the keyring, once. Only when they are needed, so a
-    /// locked keyring asks for its password only then.
+    /// Reads the keys from the keyring, once it succeeds. Only when they are
+    /// needed, so a locked keyring asks for its password only then.
     pub async fn load_keys(&self) {
         if self.keys_loaded.replace(true) {
             return;
         }
+        // After a failure, for example a cancelled unlock prompt, the next
+        // action that needs the keys tries again.
         let opened = match SecretStore::open().await {
             Ok(store) => store,
             Err(error) => {
                 eprintln!("typewhisper: no keyring for the server keys: {error}");
                 *self.keyring_error.borrow_mut() = Some(error.to_string());
+                self.keys_loaded.set(false);
                 return;
             }
         };
         match opened.load_all(PLUGIN_ID).await {
-            Ok(keys) => *self.keys.borrow_mut() = keys,
+            Ok(keys) => {
+                *self.keys.borrow_mut() = keys;
+                *self.keyring_error.borrow_mut() = None;
+            }
             Err(error) => {
                 eprintln!("typewhisper: the server keys could not be read: {error}");
                 *self.keyring_error.borrow_mut() = Some(error.to_string());
+                self.keys_loaded.set(false);
             }
         }
         *self.secrets.borrow_mut() = Some(Rc::new(opened));
@@ -199,6 +206,11 @@ impl ServerProfiles {
     async fn save(self: &Rc<Self>, profile: Profile, key: KeyChange) -> Result<(), String> {
         let entry = secret_name(&profile.id);
         if !matches!(key, KeyChange::Keep) {
+            // The keyring may have failed when the editor opened; try it again.
+            let missing = self.secrets.borrow().is_none();
+            if missing {
+                self.load_keys().await;
+            }
             let store = self.secrets.borrow().clone().ok_or_else(|| {
                 let reason = self.keyring_error.borrow().clone().unwrap_or_default();
                 tr_with(
