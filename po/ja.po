@@ -249,6 +249,10 @@ msgid "Restart"
 msgstr "再起動"
 
 #: crates/typewhisper/src/app.rs
+msgid "Try Again"
+msgstr "再試行"
+
+#: crates/typewhisper/src/app.rs
 msgid "No connection to the desktop"
 msgstr "デスクトップに接続できません"
 

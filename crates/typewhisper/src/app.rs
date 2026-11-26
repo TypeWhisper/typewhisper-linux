@@ -187,6 +187,9 @@ struct State {
     takes_settings: bool,
     /// The desktop's keyring, opened when an engine first needs it.
     secrets: Option<Rc<SecretStore>>,
+    /// True while an API key goes into the keyring, which may first ask the
+    /// user to unlock it. The engine stays put meanwhile.
+    saving_key: bool,
     model: ModelState,
     phase: Phase,
     busy: bool,
@@ -964,7 +967,8 @@ impl App {
         self.filling_pickers.set(false);
     }
 
-    /// The pickers work while nothing runs: no dictation, download or start.
+    /// The pickers and the API key work while nothing runs: no dictation,
+    /// download, start or keyring access.
     fn refresh_picker_sensitivity(&self) {
         let state = self.state.borrow();
         let settled = matches!(
@@ -976,9 +980,10 @@ impl App {
                 | ModelState::Failed(_)
                 | ModelState::Lost
         );
-        let sensitive = settled && state.phase == Phase::Idle && !state.busy;
+        let sensitive = settled && state.phase == Phase::Idle && !state.busy && !state.saving_key;
         self.ui.engine_picker.set_sensitive(sensitive);
         self.ui.model_picker.set_sensitive(sensitive);
+        self.ui.api_key.set_sensitive(sensitive);
     }
 
     fn refresh_model(&self) {
@@ -1028,6 +1033,9 @@ impl App {
         ));
         ui.model_button.set_label(&if model == ModelState::Lost {
             tr("Restart")
+        } else if self.state.borrow().takes_settings {
+            // A cloud engine has nothing to download; its setup is repeated.
+            tr("Try Again")
         } else {
             tr("Download")
         });
@@ -1090,6 +1098,11 @@ impl App {
                 &[("error", &error.to_string())],
             ));
         }
+    }
+
+    fn set_saving_key(&self, saving: bool) {
+        self.state.borrow_mut().saving_key = saving;
+        self.refresh_picker_sensitivity();
     }
 
     fn plugin_lost_during_setup(&self) {
@@ -1574,7 +1587,7 @@ async fn save_api_key(app: Rc<App>, key: Option<String>) {
         return;
     };
     let key = key.filter(|k| !k.is_empty());
-    app.ui.api_key.set_sensitive(false);
+    app.set_saving_key(true);
     let saved = match secret_store(&app).await {
         Ok(store) => match &key {
             Some(key) => store.store(&engine.manifest.id, cloud::API_KEY, key).await,
@@ -1582,7 +1595,12 @@ async fn save_api_key(app: Rc<App>, key: Option<String>) {
         },
         Err(error) => Err(error),
     };
-    app.ui.api_key.set_sensitive(true);
+    app.set_saving_key(false);
+    // The pickers were locked, but the engine must still be the one whose key
+    // was saved before its plugin hears of it.
+    if app.engine().map(|e| e.manifest.id) != Some(engine.manifest.id.clone()) {
+        return;
+    }
     if let Err(error) = saved {
         app.toast(&tr_with(
             "The API key could not be saved in the keyring: {error}",
@@ -1659,6 +1677,19 @@ async fn download_model(app: Rc<App>) {
     let Some(model) = app.current_model() else {
         return;
     };
+    if app.state.borrow().takes_settings {
+        // A cloud engine fails mostly at its settings, for example when the
+        // keyring stayed locked, so trying again starts there.
+        app.set_model(ModelState::Loading);
+        match configure_plugin(&app).await {
+            Ok(true) => {}
+            Ok(false) => return app.set_model(ModelState::NeedsKey),
+            Err(error) => return app.setup_failed(error),
+        }
+        if model.installed {
+            return load_model(app).await;
+        }
+    }
     app.set_model(ModelState::Downloading(Some(0.0)));
     let engine = engine_name(app.engine().as_ref());
     let (progress_tx, progress_rx) = async_channel::unbounded::<Option<f64>>();

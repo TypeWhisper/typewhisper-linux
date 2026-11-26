@@ -101,7 +101,7 @@ impl ApiKeyGroup {
         self.remove.set_visible(key.is_some());
     }
 
-    /// While the keyring is busy, nothing can be changed.
+    /// The key can be changed only while nothing else runs.
     pub fn set_sensitive(&self, sensitive: bool) {
         self.entry.set_sensitive(sensitive);
     }

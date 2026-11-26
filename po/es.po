@@ -249,6 +249,10 @@ msgid "Restart"
 msgstr "Reiniciar"
 
 #: crates/typewhisper/src/app.rs
+msgid "Try Again"
+msgstr "Volver a intentarlo"
+
+#: crates/typewhisper/src/app.rs
 msgid "No connection to the desktop"
 msgstr "Sin conexión con el escritorio"
 
