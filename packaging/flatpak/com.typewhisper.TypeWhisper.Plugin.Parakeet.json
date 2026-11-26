@@ -233,6 +233,7 @@
     },
     {
       "name": "parakeet",
+      "license-files": ["LICENSE", "packaging/licenses/parakeet-crates.txt"],
       "buildsystem": "simple",
       "build-options": {
         "env": {

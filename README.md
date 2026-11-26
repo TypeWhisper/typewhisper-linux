@@ -103,7 +103,9 @@ The builds have no network access, as on Flathub. flatpak-builder downloads ever
 source beforehand and checks its hash. Cargo takes the crates from
 `packaging/flatpak/cargo-sources.json`, so after every change to `Cargo.lock` run
 `tools/flatpak/update-cargo-sources.sh` and commit the result; CI fails while the
-file is out of date. The add-on builds ONNX Runtime, sherpa-onnx and their C++
+file is out of date. The same goes for the license notices of the Rust crates in
+`packaging/licenses/`, which the Flatpaks install: `tools/licenses/update-crate-licenses.sh`
+writes them with cargo-about 0.9.3. The add-on builds ONNX Runtime, sherpa-onnx and their C++
 libraries from source. github.com/microsoft/onnxruntime returns 404, so the ONNX
 Runtime source comes from the matching release on
 [TypeWhisper/onnxruntime](https://github.com/TypeWhisper/onnxruntime), a
