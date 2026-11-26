@@ -27,6 +27,12 @@ pub const SELECTED_ENGINE: &str = "selectedEngine";
 /// switching back finds the same model. The macOS key.
 pub const SELECTED_MODEL: &str = "selectedModelId";
 
+/// The key of a plugin's setting, `plugin.<plugin ID>.<name>`, as the macOS
+/// app saves the settings of its plugins.
+pub fn plugin_key(plugin_id: &str, name: &str) -> String {
+    format!("plugin.{plugin_id}.{name}")
+}
+
 pub struct Settings {
     path: PathBuf,
     values: Map<String, Value>,
@@ -76,6 +82,36 @@ impl Settings {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// The settings of one plugin by name, as the plugin gets them. Names with
+    /// a dot are left out: they belong to a plugin whose ID starts with this one.
+    pub fn plugin_values(&self, plugin_id: &str) -> Map<String, Value> {
+        let prefix = plugin_key(plugin_id, "");
+        self.values
+            .iter()
+            .filter_map(|(key, value)| {
+                let name = key.strip_prefix(&prefix)?;
+                (!name.is_empty() && !name.contains('.')).then(|| (name.to_owned(), value.clone()))
+            })
+            .collect()
+    }
+
+    /// Changes one setting of a plugin and writes the file right away. `Null`
+    /// removes it.
+    pub fn set_plugin_value(
+        &mut self,
+        plugin_id: &str,
+        name: &str,
+        value: Value,
+    ) -> std::io::Result<()> {
+        let key = plugin_key(plugin_id, name);
+        if value.is_null() {
+            self.values.remove(&key);
+        } else {
+            self.values.insert(key, value);
+        }
+        self.save()
     }
 
     /// Changes one value and writes the file right away.
@@ -168,6 +204,45 @@ mod tests {
             Some("com.typewhisper.whisper-cpp")
         );
         assert_eq!(again.string(SELECTED_MODEL).as_deref(), Some("base"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn keeps_the_settings_of_each_plugin_apart() {
+        let dir = std::env::temp_dir().join(format!("tw-settings-plugin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"plugin.com.typewhisper.groq.beta.selectedModel": "x", "plugin.com.typewhisper.groqx.a": 1}"#,
+        )
+        .unwrap();
+
+        let mut settings = Settings::load_from(path.clone());
+        assert!(settings.plugin_values("com.typewhisper.groq").is_empty());
+        settings
+            .set_plugin_value(
+                "com.typewhisper.groq",
+                "selectedModel",
+                "whisper-large-v3".into(),
+            )
+            .unwrap();
+        let again = Settings::load_from(path.clone());
+        let values = again.plugin_values("com.typewhisper.groq");
+        assert_eq!(values.len(), 1);
+        assert_eq!(values["selectedModel"], "whisper-large-v3");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"plugin.com.typewhisper.groq.selectedModel\""));
+
+        let mut again = again;
+        again
+            .set_plugin_value("com.typewhisper.groq", "selectedModel", Value::Null)
+            .unwrap();
+        assert!(
+            Settings::load_from(path)
+                .plugin_values("com.typewhisper.groq")
+                .is_empty()
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
