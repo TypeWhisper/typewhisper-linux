@@ -1,0 +1,11 @@
+{
+  "id": "com.typewhisper.whisper-cpp",
+  "name": "Whisper",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "minHostVersion": "0.1.0",
+  "executable": "bin/tw-plugin-whisper-cpp",
+  "categories": ["transcription"],
+  "locality": "local",
+  "architectures": ["x64", "arm64"]
+}

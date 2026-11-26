@@ -67,6 +67,11 @@ msgstr ""
 msgid "Runs offline with no API key."
 msgstr ""
 
+#. Leave {model} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "{model} (English)"
+msgstr ""
+
 #. Leave {error} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "The setting could not be saved: {error}"
@@ -107,6 +112,14 @@ msgstr ""
 
 #: crates/typewhisper/src/app.rs
 msgid "Hotkey"
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
+msgid "Default Engine"
+msgstr ""
+
+#: crates/typewhisper/src/app.rs
+msgid "Model"
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
@@ -199,15 +212,16 @@ msgid "Short press to toggle, hold to push-to-talk."
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
-msgid "Looking for the Parakeet plugin…"
+msgid "Starting…"
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
 msgid "The speech model stopped unexpectedly."
 msgstr ""
 
+#. Leave {size} as it is.
 #: crates/typewhisper/src/app.rs
-msgid "Connect to the internet to download it (465 MB)."
+msgid "Connect to the internet to download it ({size})."
 msgstr ""
 
 #: crates/typewhisper/src/app.rs
@@ -236,10 +250,6 @@ msgstr ""
 
 #: crates/typewhisper/src/app.rs
 msgid "Transcribing…"
-msgstr ""
-
-#: crates/typewhisper/src/app.rs
-msgid "Starting…"
 msgstr ""
 
 #: crates/typewhisper/src/app.rs

@@ -8,9 +8,10 @@ written in Rust with GTK 4 and libadwaita and uses the XDG desktop portals, so i
 runs on GNOME and KDE Plasma under Wayland and inside Flatpak.
 
 **Status: early development.** The app dictates: hold or tap a global shortcut,
-speak, and NVIDIA Parakeet transcribes on the CPU and pastes the text into the
-focused app. There are a few settings, but no workflows or other engines yet. The
-groundwork comes from a [platform spike](docs/spike-2026-11.md) on GNOME 51 and
+speak, and a local speech engine transcribes on the CPU and pastes the text into
+the focused app. The engines are NVIDIA Parakeet, the default, and OpenAI Whisper
+through whisper.cpp, with the model sizes of the Windows app. There are a few
+settings, but no workflows yet. The groundwork comes from a [platform spike](docs/spike-2026-11.md) on GNOME 51 and
 Plasma 6.8.
 
 Terminals get Ctrl+Shift+V instead of Ctrl+V. The app recognizes them through
@@ -29,6 +30,7 @@ terminals that show up in AT-SPI.
 | `crates/tw-plugin-protocol` | Wire protocol between the app and plugin processes |
 | `crates/tw-plugin-host` | Finds installed plugins, starts them and calls them |
 | `plugins/parakeet` | NVIDIA Parakeet through sherpa-onnx, as a plugin process |
+| `plugins/whisper-cpp` | OpenAI Whisper through whisper.cpp, as a plugin process |
 | `gnome-shell-extension` | Indicator overlay and focused-app reporting on GNOME |
 | `packaging` | Flatpak manifest, desktop file, AppStream metadata |
 | `tools` | Headless VM sessions, probes for portal behaviour, Flatpak helpers |
@@ -65,14 +67,17 @@ packages.
 Fedora:
 
 ```sh
-sudo dnf install gcc gcc-c++ cargo rust gettext gtk4-devel gtk4-layer-shell-devel libadwaita-devel pulseaudio-libs-devel
+sudo dnf install gcc gcc-c++ cargo rust gettext cmake clang-devel gtk4-devel gtk4-layer-shell-devel libadwaita-devel pulseaudio-libs-devel
 cargo build --workspace
 cargo test --workspace
 cargo run -p typewhisper
 ```
 
-Ubuntu 26.04: install `build-essential gettext libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev libpulse-dev`
+Ubuntu 26.04: install `build-essential gettext cmake libclang-dev libgtk-4-dev libgtk4-layer-shell-dev libadwaita-1-dev libpulse-dev`
 and Rust through rustup.
+
+The Whisper plugin compiles whisper.cpp from source with CMake, and bindgen reads
+its header with libclang. The build optimizes for the CPU it runs on.
 
 To dictate with a development build, install it for your user first:
 
@@ -82,10 +87,11 @@ target/release/typewhisper
 ```
 
 The script builds the release, installs a `.desktop` file that points at it and
-copies the Parakeet plugin to `~/.local/share/typewhisper/plugins`. The desktop
-portals refuse an app ID without a matching `.desktop` file. In the window, set up
-the shortcut, allow typing (on GNOME, switch on "Allow Remote Interaction" in the
-dialog) and download the speech model.
+copies the Parakeet and Whisper plugins to `~/.local/share/typewhisper/plugins`.
+The desktop portals refuse an app ID without a matching `.desktop` file. In the
+window, set up the shortcut, allow typing (on GNOME, switch on "Allow Remote
+Interaction" in the dialog) and download the speech model. Under Engine, pick
+Whisper and one of its models to dictate with it instead of Parakeet.
 
 Flatpak:
 
@@ -97,7 +103,8 @@ flatpak run com.typewhisper.TypeWhisper
 
 The app defines the extension point `com.typewhisper.TypeWhisper.Plugin`, and each
 plugin is its own Flatpak mounted under `/app/plugins/<name>`. The second command
-builds Parakeet that way; it needs the app installed first.
+builds Parakeet that way; it needs the app installed first. Whisper has no add-on
+yet.
 
 The builds have no network access, as on Flathub. flatpak-builder downloads every
 source beforehand and checks its hash. Cargo takes the crates from

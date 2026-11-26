@@ -1,7 +1,7 @@
 //! The app: a setup window, the dictation shortcut, and the flow from
 //! recording to transcription to insertion.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -17,7 +17,7 @@ use tw_platform::insert::{PasteKeys, TextInserter};
 use tw_platform::settings::{self, Settings};
 use tw_platform::shortcuts::{self, BoundShortcut, Command, PressInterpreter};
 use tw_platform::zbus;
-use tw_plugin_host::{PluginError, PluginProcess, discover, plugin_dirs};
+use tw_plugin_host::{InstalledPlugin, PluginError, PluginProcess, discover, plugin_dirs};
 
 use crate::APP_ID;
 use crate::formatting;
@@ -26,13 +26,13 @@ use crate::overlay::Overlay;
 use crate::shell_bridge::ShellBridge;
 use crate::terminals::{self, TerminalApps};
 
+/// The default engine, and its name while no engine is found.
 const PARAKEET: &str = "com.typewhisper.parakeet";
+const PARAKEET_NAME: &str = "NVIDIA Parakeet";
 const SHORTCUT_DESCRIPTION: &str = n_("Start and stop dictation");
 /// Shorter recordings are treated as accidental presses.
 const MIN_SAMPLES: usize = SAMPLE_RATE as usize / 4;
 
-/// The model the Parakeet plugin ships.
-const MODEL_NAME: &str = "NVIDIA Parakeet TDT 0.6B v3";
 const MODEL_SUMMARY: &str = n_("Runs offline with no API key.");
 /// How long the indicator keeps the result of a dictation on screen.
 const INSERTED_FEEDBACK: Duration = Duration::from_millis(900);
@@ -55,6 +55,11 @@ struct Ui {
     shortcut_row: adw::ActionRow,
     shortcut_button: gtk::Button,
     shortcut_key: gtk::Label,
+    engine_picker: adw::ComboRow,
+    engine_names: gtk::StringList,
+    model_picker: adw::ComboRow,
+    model_names: gtk::StringList,
+    /// The model in use: its download, loading and errors.
     model_row: adw::ActionRow,
     model_button: gtk::Button,
     model_progress: gtk::Box,
@@ -90,6 +95,58 @@ enum ModelState {
     Lost,
 }
 
+/// A model as the plugin lists it in `initialize`.
+#[derive(Clone)]
+struct ModelInfo {
+    id: String,
+    name: String,
+    /// Knows only English, like Whisper's `.en` models.
+    english_only: bool,
+    recommended: bool,
+    size_bytes: u64,
+    installed: bool,
+}
+
+impl ModelInfo {
+    fn from_json(value: &Value) -> Option<Self> {
+        Some(Self {
+            id: value["id"].as_str()?.to_owned(),
+            name: value["name"].as_str()?.to_owned(),
+            english_only: value["englishOnly"].as_bool().unwrap_or(false),
+            recommended: value["recommended"].as_bool().unwrap_or(false),
+            size_bytes: value["sizeBytes"].as_u64().unwrap_or(0),
+            installed: value["installed"].as_bool().unwrap_or(false),
+        })
+    }
+
+    /// The name shown in the window.
+    fn label(&self) -> String {
+        if self.english_only {
+            tr_with("{model} (English)", &[("model", &self.name)])
+        } else {
+            self.name.clone()
+        }
+    }
+}
+
+/// Transcription plugins, NVIDIA Parakeet first as the default, then by name.
+fn engines(mut plugins: Vec<InstalledPlugin>) -> Vec<InstalledPlugin> {
+    plugins.retain(|p| p.manifest.categories.iter().any(|c| c == "transcription"));
+    plugins.sort_by_cached_key(|p| (p.manifest.id != PARAKEET, p.manifest.name.to_lowercase()));
+    plugins
+}
+
+/// The model to use: the saved one if the engine has it, else the recommended
+/// one if it is downloaded, else any downloaded one, else the recommended one.
+fn pick_model(models: &[ModelInfo], saved: Option<&str>) -> Option<usize> {
+    let find = |wanted: &dyn Fn(&ModelInfo) -> bool| models.iter().position(wanted);
+    find(&|m| Some(m.id.as_str()) == saved)
+        .or_else(|| find(&|m| m.recommended && m.installed))
+        .or_else(|| find(&|m| m.installed))
+        .or_else(|| find(&|m| m.recommended))
+        .or_else(|| (!models.is_empty()).then_some(0))
+}
+
 #[derive(Clone, Copy, Default, PartialEq)]
 enum Phase {
     #[default]
@@ -108,7 +165,15 @@ struct State {
     shortcut: Option<BoundShortcut>,
     interpreter: PressInterpreter,
     recorder: Option<Recorder>,
+    /// Transcription plugins found at startup, the default engine first.
+    engines: Vec<InstalledPlugin>,
+    /// The engine in use, an index into `engines`.
+    engine: Option<usize>,
     plugin: Option<Arc<Mutex<PluginProcess>>>,
+    /// The running engine's models, as it listed them when it started.
+    models: Vec<ModelInfo>,
+    /// The model in use, an index into `models`.
+    model_index: Option<usize>,
     model: ModelState,
     phase: Phase,
     busy: bool,
@@ -130,6 +195,9 @@ struct App {
     ui: Ui,
     state: RefCell<State>,
     settings: RefCell<Settings>,
+    /// Set while the app itself fills the pickers, so that only the user's
+    /// choices count.
+    filling_pickers: Cell<bool>,
 }
 
 pub fn startup(application: &adw::Application) {
@@ -171,6 +239,7 @@ pub fn startup(application: &adw::Application) {
             ..Default::default()
         }),
         settings: RefCell::new(Settings::load()),
+        filling_pickers: Cell::new(false),
     });
     app.refresh_model();
     app.refresh_typing_row();
@@ -203,6 +272,16 @@ pub fn startup(application: &adw::Application) {
         move |_| {
             glib::spawn_future_local(download_model(Rc::clone(&app)));
         }
+    ));
+    app.ui.engine_picker.connect_selected_notify(glib::clone!(
+        #[weak]
+        app,
+        move |picker| choose_engine(&app, picker.selected())
+    ));
+    app.ui.model_picker.connect_selected_notify(glib::clone!(
+        #[weak]
+        app,
+        move |picker| choose_model(&app, picker.selected())
     ));
     for (row, key, default) in [
         (
@@ -279,7 +358,7 @@ async fn start_kwin_script(app: Rc<App>, connection: gio::DBusConnection) {
 
 /// The About dialog. Like the macOS app's About panel, it names the app and
 /// its version; the links and the license are the ones GNOME apps show. Legal
-/// names the speech model and the libraries that run it, see issue #17.
+/// names the speech models and the libraries that run them, see issue #17.
 fn show_about(window: &adw::ApplicationWindow) {
     let dialog = adw::AboutDialog::builder()
         .application_name("TypeWhisper")
@@ -316,6 +395,19 @@ fn show_about(window: &adw::ApplicationWindow) {
     dialog.add_legal_section(
         "ONNX Runtime",
         Some("© Microsoft Corporation"),
+        gtk::License::MitX11,
+        None,
+    );
+    // The Whisper plugin's models and the library it runs them with.
+    dialog.add_legal_section(
+        "OpenAI Whisper",
+        Some("© OpenAI"),
+        gtk::License::MitX11,
+        None,
+    );
+    dialog.add_legal_section(
+        "whisper.cpp",
+        Some("© The ggml authors"),
         gtk::License::MitX11,
         None,
     );
@@ -455,7 +547,25 @@ fn build_ui(application: &adw::Application) -> Ui {
     let hotkey = adw::PreferencesGroup::builder().title(tr("Hotkey")).build();
     hotkey.add(&shortcut_row);
 
-    let model_row = row(MODEL_NAME, "", "audio-input-microphone-symbolic");
+    // Filled once the plugins are found; the model picker shows only for an
+    // engine with a choice of models, as on macOS and Windows.
+    let engine_names = gtk::StringList::new(&[]);
+    let engine_picker = adw::ComboRow::builder()
+        .title(tr("Default Engine"))
+        .model(&engine_names)
+        .visible(false)
+        .build();
+    engine_picker.add_prefix(&gtk::Image::from_icon_name(
+        "audio-input-microphone-symbolic",
+    ));
+    let model_names = gtk::StringList::new(&[]);
+    let model_picker = adw::ComboRow::builder()
+        .title(tr("Model"))
+        .model(&model_names)
+        .visible(false)
+        .build();
+    model_picker.add_prefix(&gtk::Image::from_icon_name("view-list-symbolic"));
+    let model_row = row("", "", "package-x-generic-symbolic");
     let model_button = button(&tr("Download"));
     let model_progress_bar = gtk::ProgressBar::builder()
         .valign(gtk::Align::Center)
@@ -482,6 +592,8 @@ fn build_ui(application: &adw::Application) -> Ui {
     model_row.add_suffix(&model_spinner);
     model_row.add_suffix(&model_ready);
     let engine = adw::PreferencesGroup::builder().title(tr("Engine")).build();
+    engine.add(&engine_picker);
+    engine.add(&model_picker);
     engine.add(&model_row);
 
     let last_row = adw::ActionRow::builder()
@@ -597,6 +709,10 @@ fn build_ui(application: &adw::Application) -> Ui {
         shortcut_row,
         shortcut_button,
         shortcut_key,
+        engine_picker,
+        engine_names,
+        model_picker,
+        model_names,
         model_row,
         model_button,
         model_progress,
@@ -775,17 +891,94 @@ impl App {
         self.refresh_model();
     }
 
+    /// The engine in use.
+    fn engine(&self) -> Option<InstalledPlugin> {
+        let state = self.state.borrow();
+        state.engine.and_then(|i| state.engines.get(i)).cloned()
+    }
+
+    /// The model in use.
+    fn current_model(&self) -> Option<ModelInfo> {
+        let state = self.state.borrow();
+        state.model_index.and_then(|i| state.models.get(i)).cloned()
+    }
+
+    /// Shows the engines and the running engine's models in the pickers.
+    fn refresh_pickers(&self) {
+        let state = self.state.borrow();
+        let ui = &self.ui;
+        self.filling_pickers.set(true);
+        let engines: Vec<&str> = state
+            .engines
+            .iter()
+            .map(|e| e.manifest.name.as_str())
+            .collect();
+        ui.engine_names
+            .splice(0, ui.engine_names.n_items(), &engines);
+        ui.engine_picker.set_selected(
+            state
+                .engine
+                .map_or(gtk::INVALID_LIST_POSITION, |i| i as u32),
+        );
+        ui.engine_picker.set_visible(!engines.is_empty());
+        let models: Vec<String> = state.models.iter().map(ModelInfo::label).collect();
+        let models: Vec<&str> = models.iter().map(String::as_str).collect();
+        ui.model_names.splice(0, ui.model_names.n_items(), &models);
+        ui.model_picker.set_selected(
+            state
+                .model_index
+                .map_or(gtk::INVALID_LIST_POSITION, |i| i as u32),
+        );
+        ui.model_picker.set_visible(models.len() > 1);
+        self.filling_pickers.set(false);
+    }
+
+    /// The pickers work while nothing runs: no dictation, download or start.
+    fn refresh_picker_sensitivity(&self) {
+        let state = self.state.borrow();
+        let settled = matches!(
+            state.model,
+            ModelState::Unavailable(_)
+                | ModelState::NotDownloaded
+                | ModelState::Ready
+                | ModelState::Failed(_)
+                | ModelState::Lost
+        );
+        let sensitive = settled && state.phase == Phase::Idle && !state.busy;
+        self.ui.engine_picker.set_sensitive(sensitive);
+        self.ui.model_picker.set_sensitive(sensitive);
+    }
+
     fn refresh_model(&self) {
         let model = self.state.borrow().model.clone();
+        let current = self.current_model();
         let ui = &self.ui;
+        let several = self.state.borrow().models.len() > 1;
+        let title = match (&current, self.engine()) {
+            // The picker lists the models by their own names, such as "Base";
+            // the row names the engine too.
+            (Some(current), Some(engine)) if several => {
+                format!("{} {}", engine.manifest.name, current.label())
+            }
+            (Some(current), _) => current.label(),
+            (None, Some(engine)) => engine.manifest.name,
+            (None, None) => PARAKEET_NAME.to_owned(),
+        };
+        ui.model_row.set_title(&title);
         let subtitle = match &model {
-            ModelState::Searching => tr("Looking for the Parakeet plugin…"),
+            ModelState::Searching => tr("Starting…"),
             ModelState::Unavailable(error) | ModelState::Failed(error) => error.clone(),
             ModelState::Lost => tr("The speech model stopped unexpectedly."),
             ModelState::NotDownloaded => format!(
                 "{} {}",
                 tr(MODEL_SUMMARY),
-                tr("Connect to the internet to download it (465 MB).")
+                tr_with(
+                    "Connect to the internet to download it ({size}).",
+                    &[(
+                        "size",
+                        &glib::format_size(current.map_or(0, |m| m.size_bytes)),
+                    )],
+                )
             ),
             ModelState::Downloading(Some(_)) => tr("Downloading…"),
             ModelState::Downloading(None) => tr("Unpacking…"),
@@ -815,6 +1008,7 @@ impl App {
             ModelState::Searching | ModelState::Downloading(None) | ModelState::Loading
         ));
         ui.model_ready.set_visible(model == ModelState::Ready);
+        self.refresh_picker_sensitivity();
         self.refresh_hero();
     }
 
@@ -825,6 +1019,7 @@ impl App {
 
     fn set_phase(&self, phase: Phase) {
         self.state.borrow_mut().phase = phase;
+        self.refresh_picker_sensitivity();
         self.refresh_hero();
     }
 
@@ -942,6 +1137,8 @@ fn shortcut_flag() -> Option<std::path::PathBuf> {
 }
 
 async fn initialize(app: Rc<App>) {
+    // The window shows the engines while the portals answer.
+    let found = find_engines(Rc::clone(&app)).await;
     match tw_platform::portal::connection(APP_ID).await {
         Ok(connection) => {
             let token = tw_platform::state_dir()
@@ -971,7 +1168,9 @@ async fn initialize(app: Rc<App>) {
     }
     app.state.borrow_mut().starting = false;
     app.refresh_hero();
-    start_plugin(Rc::clone(&app)).await;
+    if found {
+        start_plugin(Rc::clone(&app)).await;
+    }
 }
 
 /// Connects to the accessibility bus for app-aware formatting and terminals.
@@ -1032,7 +1231,7 @@ async fn approve_typing(app: Rc<App>) {
     app.refresh_typing_row();
 }
 
-type PluginStart = Result<(PluginProcess, bool), String>;
+type PluginStart = Result<(PluginProcess, Vec<ModelInfo>), String>;
 
 fn missing_plugin() -> String {
     if std::env::var_os("FLATPAK_ID").is_some() {
@@ -1045,35 +1244,155 @@ fn missing_plugin() -> String {
     }
 }
 
-async fn start_plugin(app: Rc<App>) {
-    app.set_model(ModelState::Searching);
-    let started: PluginStart = gio::spawn_blocking(|| {
+/// Finds the transcription plugins and picks the saved engine, or the default
+/// one. Returns false when there is none.
+async fn find_engines(app: Rc<App>) -> bool {
+    let found = gio::spawn_blocking(|| -> Result<Vec<InstalledPlugin>, String> {
         let data = tw_platform::data_dir().map_err(|e| e.to_string())?;
-        let plugins = discover(&plugin_dirs(&data.join("plugins")));
-        let parakeet = plugins
-            .iter()
-            .find(|p| p.manifest.id == PARAKEET)
-            .ok_or_else(missing_plugin)?;
-        let plugin_data = data.join("plugin-data").join(PARAKEET);
+        Ok(engines(discover(&plugin_dirs(&data.join("plugins")))))
+    })
+    .await
+    .unwrap_or_else(|_| Err(tr("The plugin host crashed.")));
+    let engines = match found {
+        Ok(engines) if !engines.is_empty() => engines,
+        Ok(_) => {
+            app.set_model(ModelState::Unavailable(missing_plugin()));
+            return false;
+        }
+        Err(error) => {
+            app.set_model(ModelState::Unavailable(error));
+            return false;
+        }
+    };
+    // A saved engine that is no longer installed leaves the choice saved, in
+    // case it comes back, and dictation uses the default engine meanwhile.
+    let saved = app.settings.borrow().string(settings::SELECTED_ENGINE);
+    let index = saved
+        .and_then(|id| engines.iter().position(|e| e.manifest.id == id))
+        .unwrap_or(0);
+    {
+        let mut state = app.state.borrow_mut();
+        state.engines = engines;
+        state.engine = Some(index);
+    }
+    app.refresh_pickers();
+    app.refresh_model();
+    true
+}
+
+/// Starts the plugin of the engine in use and loads its model.
+async fn start_plugin(app: Rc<App>) {
+    let Some(engine) = app.engine() else {
+        return;
+    };
+    {
+        let mut state = app.state.borrow_mut();
+        state.models.clear();
+        state.model_index = None;
+    }
+    app.refresh_pickers();
+    app.set_model(ModelState::Searching);
+    let started: PluginStart = gio::spawn_blocking(move || {
+        let data = tw_platform::data_dir().map_err(|e| e.to_string())?;
+        let plugin_data = data.join("plugin-data").join(&engine.manifest.id);
         let (process, info) =
-            PluginProcess::start(parakeet, &plugin_data, env!("CARGO_PKG_VERSION"))
+            PluginProcess::start(&engine, &plugin_data, env!("CARGO_PKG_VERSION"))
                 .map_err(|e| e.to_string())?;
-        let installed = info["models"][0]["installed"].as_bool().unwrap_or(false);
-        Ok((process, installed))
+        let models = info["models"]
+            .as_array()
+            .map(|models| models.iter().filter_map(ModelInfo::from_json).collect())
+            .unwrap_or_default();
+        Ok((process, models))
     })
     .await
     .unwrap_or_else(|_| Err(tr("The plugin host crashed.")));
 
     match started {
-        Ok((process, installed)) => {
-            app.state.borrow_mut().plugin = Some(Arc::new(Mutex::new(process)));
-            if installed {
-                load_model(app).await;
-            } else {
-                app.set_model(ModelState::NotDownloaded);
+        Ok((process, models)) => {
+            let saved = app.settings.borrow().string(settings::SELECTED_MODEL);
+            let index = pick_model(&models, saved.as_deref());
+            let installed = index.is_some_and(|i| models[i].installed);
+            {
+                let mut state = app.state.borrow_mut();
+                state.plugin = Some(Arc::new(Mutex::new(process)));
+                state.models = models;
+                state.model_index = index;
+            }
+            app.refresh_pickers();
+            match index {
+                Some(_) if installed => load_model(app).await,
+                Some(_) => app.set_model(ModelState::NotDownloaded),
+                None => app.set_model(ModelState::Unavailable(tr("No model loaded"))),
             }
         }
         Err(error) => app.set_model(ModelState::Unavailable(error)),
+    }
+}
+
+/// Saves a setting the user chose; a failure shows as a toast.
+fn save_choice(app: &App, key: &str, value: &str) {
+    let saved = app.settings.borrow_mut().set_string(key, value);
+    if let Err(error) = saved {
+        app.toast(&tr_with(
+            "The setting could not be saved: {error}",
+            &[("error", &error.to_string())],
+        ));
+    }
+}
+
+/// Switches to the engine at `index` of the picker: stops the running plugin
+/// and starts the new one.
+fn choose_engine(app: &Rc<App>, index: u32) {
+    if app.filling_pickers.get() {
+        return;
+    }
+    let index = index as usize;
+    let (id, old) = {
+        let mut state = app.state.borrow_mut();
+        if state.engine == Some(index) {
+            return;
+        }
+        let Some(engine) = state.engines.get(index) else {
+            return;
+        };
+        let id = engine.manifest.id.clone();
+        state.engine = Some(index);
+        (id, state.plugin.take())
+    };
+    save_choice(app, settings::SELECTED_ENGINE, &id);
+    // Refuses dictations until the new engine is ready.
+    app.set_model(ModelState::Searching);
+    // Stopping the old plugin waits for it to exit, so it happens off the
+    // main thread.
+    if let Some(old) = old {
+        drop(gio::spawn_blocking(move || drop(old)));
+    }
+    glib::spawn_future_local(start_plugin(Rc::clone(app)));
+}
+
+/// Switches to the model at `index` of the picker. A downloaded model loads
+/// right away; another one waits for the download.
+fn choose_model(app: &Rc<App>, index: u32) {
+    if app.filling_pickers.get() {
+        return;
+    }
+    let index = index as usize;
+    let model = {
+        let mut state = app.state.borrow_mut();
+        if state.model_index == Some(index) {
+            return;
+        }
+        let Some(model) = state.models.get(index).cloned() else {
+            return;
+        };
+        state.model_index = Some(index);
+        model
+    };
+    save_choice(app, settings::SELECTED_MODEL, &model.id);
+    if model.installed {
+        glib::spawn_future_local(load_model(Rc::clone(app)));
+    } else {
+        app.set_model(ModelState::NotDownloaded);
     }
 }
 
@@ -1090,9 +1409,16 @@ async fn load_model(app: Rc<App>) {
     let Some(plugin) = app.state.borrow().plugin.clone() else {
         return;
     };
+    let Some(model) = app.current_model() else {
+        return;
+    };
     app.set_model(ModelState::Loading);
     let loaded = gio::spawn_blocking(move || {
-        call_plugin(&plugin, "transcription.loadModel", json!({"threads": 4}))
+        call_plugin(
+            &plugin,
+            "transcription.loadModel",
+            json!({"modelId": model.id, "threads": 4}),
+        )
     })
     .await
     .unwrap_or(Err(CallError::Lost));
@@ -1115,6 +1441,9 @@ async fn download_model(app: Rc<App>) {
         }
         return;
     };
+    let Some(model) = app.current_model() else {
+        return;
+    };
     app.set_model(ModelState::Downloading(Some(0.0)));
     let (progress_tx, progress_rx) = async_channel::unbounded::<Option<f64>>();
     glib::spawn_future_local(glib::clone!(
@@ -1130,7 +1459,7 @@ async fn download_model(app: Rc<App>) {
         let mut process = plugin.lock().map_err(|_| CallError::Lost)?;
         Ok(process.call(
             "models.download",
-            json!({"force": true}),
+            json!({"modelId": model.id, "force": true}),
             &mut |method, params| {
                 if method != "models.progress" {
                     return;
@@ -1149,7 +1478,15 @@ async fn download_model(app: Rc<App>) {
     .await
     .unwrap_or(Err(CallError::Lost));
     match result {
-        Ok(_) => load_model(app).await,
+        Ok(_) => {
+            {
+                let mut state = app.state.borrow_mut();
+                if let Some(index) = state.model_index {
+                    state.models[index].installed = true;
+                }
+            }
+            load_model(app).await;
+        }
         Err(CallError::Failed(error)) => app.set_model(ModelState::Failed(error)),
         Err(CallError::Lost) => app.plugin_lost_during_setup(),
     }
@@ -1330,5 +1667,92 @@ impl From<PluginError> for CallError {
             }
             other => CallError::Failed(other.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plugin(id: &str, name: &str, category: &str) -> InstalledPlugin {
+        let manifest = json!({
+            "id": id, "name": name, "version": "0.1.0", "protocolVersion": 1,
+            "minHostVersion": "0.1.0", "executable": "bin/plugin", "categories": [category],
+            "locality": "local", "architectures": ["x64", "arm64"]
+        });
+        InstalledPlugin {
+            manifest: serde_json::from_value(manifest).unwrap(),
+            dir: id.into(),
+            is_system: false,
+        }
+    }
+
+    #[test]
+    fn lists_parakeet_first_and_only_transcription_engines() {
+        let found = engines(vec![
+            plugin("com.typewhisper.whisper-cpp", "Whisper", "transcription"),
+            plugin("com.example.formatter", "Formatter", "llm"),
+            plugin(PARAKEET, "NVIDIA Parakeet", "transcription"),
+            plugin("com.example.another", "Another", "transcription"),
+        ]);
+        let ids: Vec<&str> = found.iter().map(|p| p.manifest.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            [
+                PARAKEET,
+                "com.example.another",
+                "com.typewhisper.whisper-cpp"
+            ]
+        );
+    }
+
+    fn model(id: &str, recommended: bool, installed: bool) -> ModelInfo {
+        ModelInfo {
+            id: id.into(),
+            name: id.into(),
+            english_only: false,
+            recommended,
+            size_bytes: 1,
+            installed,
+        }
+    }
+
+    #[test]
+    fn picks_the_saved_then_a_downloaded_then_the_recommended_model() {
+        let models = [
+            model("tiny", false, true),
+            model("base", true, false),
+            model("small", false, true),
+        ];
+        assert_eq!(pick_model(&models, Some("small")), Some(2));
+        // A model of another engine, or none saved.
+        assert_eq!(pick_model(&models, Some("parakeet")), Some(0));
+        assert_eq!(pick_model(&models, None), Some(0));
+
+        let fresh = [model("tiny", false, false), model("base", true, false)];
+        assert_eq!(pick_model(&fresh, None), Some(1));
+        let ready = [model("tiny", false, true), model("base", true, true)];
+        assert_eq!(pick_model(&ready, None), Some(1));
+        assert_eq!(pick_model(&[model("only", false, false)], None), Some(0));
+        assert_eq!(pick_model(&[], Some("base")), None);
+    }
+
+    #[test]
+    fn reads_the_models_of_both_plugins() {
+        let whisper = ModelInfo::from_json(&json!({
+            "id": "base.en", "name": "Base", "englishOnly": true,
+            "recommended": false, "sizeBytes": 147_964_211, "installed": false
+        }))
+        .unwrap();
+        assert!(whisper.english_only);
+        assert_eq!(whisper.label(), "Base (English)");
+        // Parakeet's answer has no flags.
+        let parakeet = ModelInfo::from_json(&json!({
+            "id": "parakeet-tdt-0.6b-v3-int8", "name": "NVIDIA Parakeet TDT 0.6B v3",
+            "languages": "25 European languages", "sizeBytes": 487_211_443, "installed": true
+        }))
+        .unwrap();
+        assert!(parakeet.installed && !parakeet.english_only && !parakeet.recommended);
+        assert!(ModelInfo::from_json(&json!({"id": "x"})).is_none());
     }
 }

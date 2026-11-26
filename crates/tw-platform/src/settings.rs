@@ -18,6 +18,14 @@ pub const STRIP_STANDALONE_VALUE_PERIOD: &str = "stripFinalPeriodFromStandaloneV
 /// App IDs of terminals the user added to the built-in ones. The key is the
 /// macOS one, where the list holds bundle identifiers.
 pub const TERMINAL_APPS: &str = "terminalAppBundleIdentifiers";
+/// Plugin ID of the engine that transcribes dictations, such as
+/// `com.typewhisper.whisper-cpp`. Missing means NVIDIA Parakeet. The macOS key,
+/// where it holds the engine's provider ID.
+pub const SELECTED_ENGINE: &str = "selectedEngine";
+/// The model picked for an engine with a choice of models, such as `base` for
+/// Whisper. It stays while an engine with a single model is in use, so
+/// switching back finds the same model. The macOS key.
+pub const SELECTED_MODEL: &str = "selectedModelId";
 
 pub struct Settings {
     path: PathBuf,
@@ -48,6 +56,13 @@ impl Settings {
             .unwrap_or(default)
     }
 
+    pub fn string(&self, key: &str) -> Option<String> {
+        self.values
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }
+
     /// A list of strings. Entries that are not strings are skipped.
     pub fn strings(&self, key: &str) -> Vec<String> {
         self.values
@@ -66,6 +81,13 @@ impl Settings {
     /// Changes one value and writes the file right away.
     pub fn set_bool(&mut self, key: &str, value: bool) -> std::io::Result<()> {
         self.values.insert(key.to_owned(), Value::Bool(value));
+        self.save()
+    }
+
+    /// Changes one text and writes the file right away.
+    pub fn set_string(&mut self, key: &str, value: &str) -> std::io::Result<()> {
+        self.values
+            .insert(key.to_owned(), Value::String(value.to_owned()));
         self.save()
     }
 
@@ -124,6 +146,28 @@ mod tests {
             .unwrap();
         let again = Settings::load_from(path);
         assert_eq!(again.strings(TERMINAL_APPS), ["org.example.Term"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn keeps_a_string() {
+        let dir = std::env::temp_dir().join(format!("tw-settings-string-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"selectedEngine": 3}"#).unwrap();
+
+        let mut settings = Settings::load_from(path.clone());
+        assert_eq!(settings.string(SELECTED_ENGINE), None);
+        settings
+            .set_string(SELECTED_ENGINE, "com.typewhisper.whisper-cpp")
+            .unwrap();
+        settings.set_string(SELECTED_MODEL, "base").unwrap();
+        let again = Settings::load_from(path);
+        assert_eq!(
+            again.string(SELECTED_ENGINE).as_deref(),
+            Some("com.typewhisper.whisper-cpp")
+        );
+        assert_eq!(again.string(SELECTED_MODEL).as_deref(), Some("base"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

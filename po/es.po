@@ -67,6 +67,11 @@ msgstr "Iniciar y detener el dictado"
 msgid "Runs offline with no API key."
 msgstr "Funciona sin conexión y sin clave de API."
 
+#. Leave {model} as it is.
+#: crates/typewhisper/src/app.rs
+msgid "{model} (English)"
+msgstr "{model} (inglés)"
+
 #. Leave {error} as it is.
 #: crates/typewhisper/src/app.rs
 msgid "The setting could not be saved: {error}"
@@ -108,6 +113,14 @@ msgstr "Configurar"
 #: crates/typewhisper/src/app.rs
 msgid "Hotkey"
 msgstr "Atajo de teclado"
+
+#: crates/typewhisper/src/app.rs
+msgid "Default Engine"
+msgstr "Motor predeterminado"
+
+#: crates/typewhisper/src/app.rs
+msgid "Model"
+msgstr "Modelo"
 
 #: crates/typewhisper/src/app.rs
 msgid "Download"
@@ -199,16 +212,17 @@ msgid "Short press to toggle, hold to push-to-talk."
 msgstr "Presión corta para alternar; mantén presionado para hablar."
 
 #: crates/typewhisper/src/app.rs
-msgid "Looking for the Parakeet plugin…"
-msgstr "Buscando el plugin de Parakeet…"
+msgid "Starting…"
+msgstr "Iniciando…"
 
 #: crates/typewhisper/src/app.rs
 msgid "The speech model stopped unexpectedly."
 msgstr "El modelo de voz se detuvo de forma inesperada."
 
+#. Leave {size} as it is.
 #: crates/typewhisper/src/app.rs
-msgid "Connect to the internet to download it (465 MB)."
-msgstr "Conéctate a internet para descargarlo (465 MB)."
+msgid "Connect to the internet to download it ({size})."
+msgstr "Conéctate a internet para descargarlo ({size})."
 
 #: crates/typewhisper/src/app.rs
 msgid "Downloading…"
@@ -237,10 +251,6 @@ msgstr "Grabación"
 #: crates/typewhisper/src/app.rs
 msgid "Transcribing…"
 msgstr "Transcribiendo…"
-
-#: crates/typewhisper/src/app.rs
-msgid "Starting…"
-msgstr "Iniciando…"
 
 #: crates/typewhisper/src/app.rs
 msgid "Needs Access"
