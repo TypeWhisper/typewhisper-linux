@@ -20,7 +20,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tw_plugin_protocol::{Frame, Manifest, PROTOCOL_VERSION, read_frame, write_frame};
+use tw_plugin_protocol::{
+    CAPABILITY_SETTINGS, Frame, Manifest, PROTOCOL_VERSION, PluginSettings, SETTINGS_UPDATE,
+    read_frame, write_frame,
+};
 
 /// Mount point of the `com.typewhisper.TypeWhisper.Plugin` extension point.
 /// flatpak-builder writes its own `manifest.json` at the root of every
@@ -151,10 +154,12 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
 #[derive(Debug)]
 pub enum PluginError {
     Io(io::Error),
-    /// The plugin answered with a JSON-RPC error.
+    /// The plugin answered with a JSON-RPC error. `kind` is one of the names in
+    /// [`tw_plugin_protocol::error_kind`] when the plugin sent one.
     Plugin {
         code: i64,
         message: String,
+        kind: Option<String>,
     },
     /// The plugin closed its output or sent something that is not a response.
     Protocol(String),
@@ -286,6 +291,8 @@ pub struct PluginProcess {
     next_id: u64,
     limits: Limits,
     watchdog: Watchdog,
+    /// The `capabilities` the plugin returned from `initialize`.
+    capabilities: Vec<String>,
 }
 
 impl PluginProcess {
@@ -325,6 +332,7 @@ impl PluginProcess {
             next_id: 0,
             limits,
             watchdog,
+            capabilities: Vec::new(),
         };
         let info = process.call(
             "initialize",
@@ -332,7 +340,29 @@ impl PluginProcess {
             &mut |_, _| {},
         )?;
         process.limits = limits.with_plugin_request(&info);
+        process.capabilities = info["capabilities"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
         Ok((process, info))
+    }
+
+    /// True when the plugin takes [`PluginSettings`].
+    pub fn takes_settings(&self) -> bool {
+        self.capabilities.iter().any(|c| c == CAPABILITY_SETTINGS)
+    }
+
+    /// Gives the plugin its settings, replacing the ones it had. Returns the
+    /// plugin's answer, or `Null` without asking a plugin that takes no settings.
+    pub fn configure(&mut self, settings: &PluginSettings) -> Result<Value, PluginError> {
+        if !self.takes_settings() {
+            return Ok(Value::Null);
+        }
+        let params = serde_json::to_value(settings).map_err(io::Error::from)?;
+        self.call(SETTINGS_UPDATE, params, &mut |_, _| {})
     }
 
     /// Sends a request and waits for its response. Notifications that arrive in
@@ -358,14 +388,24 @@ impl PluginProcess {
         samples: &[f32],
         language: Option<&str>,
     ) -> Result<Value, PluginError> {
+        self.transcribe_with_prompt(samples, language, None)
+    }
+
+    /// Transcribes like [`Self::transcribe`] and passes `prompt`, words that
+    /// help the model spell names and terms, to a plugin that uses one.
+    pub fn transcribe_with_prompt(
+        &mut self,
+        samples: &[f32],
+        language: Option<&str>,
+        prompt: Option<&str>,
+    ) -> Result<Value, PluginError> {
         let limit = Limit::Total(self.limits.transcription(samples.len()));
+        let mut begin = json!({"requestId": "dictation", "language": language});
+        if let Some(prompt) = prompt {
+            begin["prompt"] = json!(prompt);
+        }
         self.within("transcription", limit, |process| {
-            process.request(
-                "transcription.begin",
-                json!({"requestId": "dictation", "language": language}),
-                limit,
-                &mut |_, _| {},
-            )?;
+            process.request("transcription.begin", begin, limit, &mut |_, _| {})?;
             for chunk in samples.chunks(1600) {
                 write_frame(&mut process.input, &Frame::Pcm(chunk.to_vec()))?;
             }
@@ -427,6 +467,7 @@ impl PluginProcess {
                                     .as_str()
                                     .unwrap_or("plugin error")
                                     .to_owned(),
+                                kind: error["data"]["kind"].as_str().map(str::to_owned),
                             });
                         }
                         return Ok(message.get("result").cloned().unwrap_or(Value::Null));
@@ -797,6 +838,96 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(killed(&process));
         drop(process);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The frames the host wrote to a fake plugin that saved its input to `input`.
+    fn requests(plugin: &InstalledPlugin) -> Vec<Value> {
+        let bytes = std::fs::read(plugin.dir.join("input")).unwrap();
+        let mut reader = bytes.as_slice();
+        let mut found = Vec::new();
+        while let Ok(Some(frame)) = read_frame(&mut reader) {
+            if let Frame::Json(message) = frame {
+                found.push(message);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn gives_settings_only_to_a_plugin_that_takes_them() {
+        let root = temp_root("settings");
+        let plugin = fake_plugin(
+            &root,
+            "cat initialize.frame settings.frame failure.frame\nexec cat > input",
+            &[
+                (
+                    "initialize.frame",
+                    response(1, json!({"capabilities": ["transcription", "settings"]})),
+                ),
+                ("settings.frame", response(2, json!({"configured": true}))),
+                (
+                    "failure.frame",
+                    frame(json!({"jsonrpc": "2.0", "id": 3, "error": {
+                        "code": -32020, "message": "Invalid API key",
+                        "data": {"kind": "authentication"}
+                    }})),
+                ),
+            ],
+        );
+        let (mut process, _) = start_fake(&plugin, &root, FAST).unwrap();
+        assert!(process.takes_settings());
+        let settings: PluginSettings = serde_json::from_value(json!({
+            "values": {"selectedModel": "whisper-large-v3"}, "secrets": {"api-key": "gsk_test"}
+        }))
+        .unwrap();
+        assert_eq!(
+            process.configure(&settings).unwrap(),
+            json!({"configured": true})
+        );
+        let failed = process.transcribe_with_prompt(&[0.0; 1600], Some("de"), Some("TypeWhisper"));
+        assert!(matches!(
+            failed,
+            Err(PluginError::Plugin { code: -32020, kind: Some(k), .. }) if k == "authentication"
+        ));
+        drop(process);
+
+        let sent = requests(&plugin);
+        assert_eq!(sent[1]["method"], SETTINGS_UPDATE);
+        assert_eq!(sent[1]["params"]["secrets"]["api-key"], "gsk_test");
+        assert_eq!(
+            sent[1]["params"]["values"]["selectedModel"],
+            "whisper-large-v3"
+        );
+        assert_eq!(sent[2]["method"], "transcription.begin");
+        assert_eq!(sent[2]["params"]["language"], "de");
+        assert_eq!(sent[2]["params"]["prompt"], "TypeWhisper");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn keeps_settings_from_a_plugin_without_the_capability() {
+        let root = temp_root("no-settings");
+        let plugin = fake_plugin(
+            &root,
+            "cat initialize.frame\nexec cat > input",
+            &[(
+                "initialize.frame",
+                response(1, json!({"capabilities": ["transcription"]})),
+            )],
+        );
+        let (mut process, _) = start_fake(&plugin, &root, FAST).unwrap();
+        assert!(!process.takes_settings());
+        let mut settings = PluginSettings::default();
+        settings.secrets.insert("api-key".into(), "gsk_test".into());
+        assert_eq!(process.configure(&settings).unwrap(), Value::Null);
+        drop(process);
+
+        let sent = requests(&plugin);
+        assert_eq!(sent[0]["method"], "initialize");
+        assert!(sent.iter().all(|m| m["method"] != SETTINGS_UPDATE));
+        let bytes = std::fs::read(plugin.dir.join("input")).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("gsk_test"));
         let _ = std::fs::remove_dir_all(root);
     }
 

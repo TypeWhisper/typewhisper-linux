@@ -1,0 +1,11 @@
+{
+  "id": "com.typewhisper.groq",
+  "name": "Groq",
+  "version": "0.1.0",
+  "protocolVersion": 1,
+  "minHostVersion": "0.1.0",
+  "executable": "bin/tw-plugin-groq",
+  "categories": ["transcription"],
+  "locality": "cloud",
+  "architectures": ["x64", "arm64"]
+}

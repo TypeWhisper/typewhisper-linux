@@ -9,14 +9,104 @@
 //!
 //! Kind 1 carries a JSON-RPC 2.0 message in UTF-8. Kind 2 carries PCM audio,
 //! 16 kHz mono f32 little-endian, for the transcription request opened last.
+//!
+//! # Settings
+//!
+//! A plugin that takes settings, such as the API key of a cloud service, lists
+//! [`CAPABILITY_SETTINGS`] among the `capabilities` it returns from
+//! `initialize`. The host then sends [`SETTINGS_UPDATE`] with a
+//! [`PluginSettings`] after `initialize` and again whenever the user changes
+//! one. Each update replaces all earlier ones. The host keeps the values in its
+//! settings and the secrets in the desktop's keyring; the plugin keeps neither.
+//! Plugins without the capability never get the request.
+//!
+//! # Errors
+//!
+//! A plugin may put [`ErrorData`] in the `data` member of a JSON-RPC error, so
+//! that the host can show its own, translated text for the failure.
+//!
+//! # Versions
+//!
+//! Host and plugin compare [`PROTOCOL_VERSION`] in `initialize`. An addition
+//! that the other side may ignore, such as an optional field or a request a
+//! plugin opts into through a capability, keeps the version. Any other change
+//! raises it.
 
+use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Version of this protocol. Host and plugin compare it in `initialize`.
 pub const PROTOCOL_VERSION: u32 = 1;
+
+/// The capability of a plugin that takes [`SETTINGS_UPDATE`].
+pub const CAPABILITY_SETTINGS: &str = "settings";
+
+/// Request from host to plugin; its params are a [`PluginSettings`].
+pub const SETTINGS_UPDATE: &str = "settings.update";
+
+/// Params of [`SETTINGS_UPDATE`]: everything the plugin is configured with.
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginSettings {
+    /// Plain options by name, for example `{"selectedModel": "whisper-large-v3"}`.
+    #[serde(default)]
+    pub values: Map<String, Value>,
+    /// Secrets by entry name, for example `{"api-key": "…"}`. A plugin with
+    /// several accounts or servers names one entry for each.
+    #[serde(default)]
+    pub secrets: BTreeMap<String, String>,
+}
+
+impl PluginSettings {
+    /// A secret that is set and not blank.
+    pub fn secret(&self, entry: &str) -> Option<&str> {
+        self.secrets
+            .get(entry)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+    }
+}
+
+/// Keeps the secrets out of logs and panic messages.
+impl std::fmt::Debug for PluginSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginSettings")
+            .field("values", &self.values)
+            .field("secrets", &self.secrets.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+/// The `data` member of a JSON-RPC error from a plugin.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ErrorData {
+    /// One of the names in [`error_kind`]; the host treats others as unknown.
+    pub kind: String,
+}
+
+/// What went wrong, for errors the host explains in its own words.
+pub mod error_kind {
+    /// The plugin lacks a setting it needs, such as an API key.
+    pub const NOT_CONFIGURED: &str = "notConfigured";
+    /// The service rejected the credentials (HTTP 401).
+    pub const AUTHENTICATION: &str = "authentication";
+    /// The credentials do not allow the request (HTTP 403).
+    pub const PERMISSION: &str = "permission";
+    /// Too many requests (HTTP 429).
+    pub const RATE_LIMIT: &str = "rateLimit";
+    /// The service could not be reached.
+    pub const NETWORK: &str = "network";
+    /// The service did not answer in time.
+    pub const TIMEOUT: &str = "timeout";
+    /// The recording is larger than the service accepts.
+    pub const REQUEST_TOO_LARGE: &str = "requestTooLarge";
+    /// The service refused the request for another reason, such as an unknown model.
+    pub const INVALID_REQUEST: &str = "invalidRequest";
+    /// The service failed (HTTP 5xx) or answered with something unreadable.
+    pub const SERVER: &str = "server";
+}
 
 /// Largest frame either side accepts. 16 MiB holds about 4 minutes of audio,
 /// far more than one 100 ms chunk, and stops a broken peer from exhausting memory.
@@ -143,6 +233,24 @@ mod tests {
         assert!(read_frame(&mut unknown.as_slice()).is_err());
         let torn_pcm = [0, 0, 0, 4, KIND_PCM, 1, 2, 3];
         assert!(read_frame(&mut torn_pcm.as_slice()).is_err());
+    }
+
+    #[test]
+    fn settings_hide_their_secrets_from_debug_output() {
+        let settings: PluginSettings = serde_json::from_value(json!({
+            "values": {"selectedModel": "whisper-large-v3"},
+            "secrets": {"api-key": "gsk_secret", "blank": "  "}
+        }))
+        .unwrap();
+        assert_eq!(settings.secret("api-key"), Some("gsk_secret"));
+        assert_eq!(settings.secret("blank"), None);
+        assert_eq!(settings.secret("missing"), None);
+        let printed = format!("{settings:?}");
+        assert!(printed.contains("api-key") && printed.contains("whisper-large-v3"));
+        assert!(!printed.contains("gsk_secret"));
+        // Both members may be left out.
+        let empty: PluginSettings = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(empty, PluginSettings::default());
     }
 
     #[test]
