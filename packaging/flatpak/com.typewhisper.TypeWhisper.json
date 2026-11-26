@@ -53,6 +53,7 @@
     },
     {
       "name": "typewhisper",
+      "license-files": ["LICENSE", "packaging/licenses/typewhisper-crates.txt"],
       "buildsystem": "simple",
       "build-commands": [
         "cargo build --release --locked --offline -p typewhisper",

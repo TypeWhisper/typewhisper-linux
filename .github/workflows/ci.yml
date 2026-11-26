@@ -136,6 +136,13 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test
         run: cargo test --workspace --locked
+      - name: Check the crate license notices
+        # The Flatpaks install them; they must match Cargo.lock. Rust cache keeps cargo-about.
+        if: matrix.arch == 'x86_64'
+        run: |
+          cargo about --version 2>/dev/null | grep -qx 'cargo-about 0.9.3' ||
+            cargo install --locked --features cli --version 0.9.3 cargo-about
+          tools/licenses/update-crate-licenses.sh --check
 
   # Builds the app and the Parakeet add-on with the commands from the README, installs both
   # and starts the plugin inside the app's sandbox.
