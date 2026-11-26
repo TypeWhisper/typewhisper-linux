@@ -1646,6 +1646,9 @@ fn choose_model(app: &Rc<App>, index: u32) {
         app.save_plugin_model(&model.id);
     }
     if model.installed {
+        // Locks the pickers before the load is scheduled, so that a second
+        // choice cannot schedule another load meanwhile.
+        app.set_model(ModelState::Loading);
         glib::spawn_future_local(load_model(Rc::clone(app)));
     } else {
         app.set_model(ModelState::NotDownloaded);
@@ -1815,13 +1818,18 @@ fn call_plugin(
         .map_err(|e| CallError::from_plugin(e, source))
 }
 
+/// Loads the chosen model. Every way out leaves a settled state, because the
+/// caller may have set `Loading` already and so locked the pickers.
 async fn load_model(app: Rc<App>) {
-    let Some(plugin) = app.state.borrow().plugin.clone() else {
-        return;
+    let plugin = app.state.borrow().plugin.clone();
+    let Some(plugin) = plugin else {
+        // The process is gone; the button starts it again.
+        return app.set_model(ModelState::Lost);
     };
     let Some(model) = app.current_model() else {
-        return;
+        return app.set_model(ModelState::Unavailable(tr("No model loaded")));
     };
+    let id = model.id.clone();
     app.set_model(ModelState::Loading);
     let source = app.source();
     let loaded = gio::spawn_blocking(move || {
@@ -1834,7 +1842,12 @@ async fn load_model(app: Rc<App>) {
     })
     .await
     .unwrap_or(Err(CallError::Lost));
+    let still_chosen = app.current_model().is_some_and(|m| m.id == id);
     match loaded {
+        Err(CallError::Lost) => app.plugin_lost_during_setup(),
+        // The result is about a model that is no longer the chosen one, so it
+        // must not describe the current choice.
+        _ if !still_chosen => {}
         Ok(_) => app.set_model(ModelState::Ready),
         Err(error) => app.setup_failed(error),
     }
